@@ -40,6 +40,11 @@ _ENV_KEY_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 #: the tools silently absent rather than reported missing.
 _MCP_STARTUP_TIMEOUT_SECS = 60
 
+#: Env var carrying the signed stub-session token. Spelled here rather than
+#: imported at module scope because ``mcp_gateway.claim`` pulls in the gateway
+#: package, and this provider is constructed from ``config.loader``.
+_STUB_SESSION_TOKEN_ENV = "KIROCREW_STUB_SESSION_TOKEN"
+
 
 class CodebrainProvider(LLMProvider):
     """A direct native-CLI LLM provider.
@@ -74,6 +79,9 @@ class CodebrainProvider(LLMProvider):
         self._closed = False
         self._active_turn = False
         self._native_session_id = ""
+        #: The signed stub-session token handed to the mounted MCP servers, minted
+        #: on first use so a provider that never mounts one publishes nothing.
+        self._stub_token = ""
 
     @property
     def context_provider_type(self) -> str:
@@ -132,7 +140,27 @@ class CodebrainProvider(LLMProvider):
             raise RuntimeError("Codex CLI is not available on PATH")
         self._resolved = resolved
         self._binary = binary
+        self._ensure_work_dir()
         self._started = True
+
+    def _ensure_work_dir(self) -> None:
+        """Create the session work dir, because the child's ``cwd`` must exist.
+
+        ``config.loader._session_work_dir`` COMPOSES the path and does not create
+        it, and a subprocess whose ``cwd`` is missing fails with a bare
+        ``FileNotFoundError`` naming a path the user never chose -- which is how a
+        sub-agent (its key ``subagent:<id>`` becoming ``subagent_<id>`` under the
+        workspace root) died before reaching the model, with the error surfacing
+        as the RUN's output rather than as a setup fault.
+
+        The provider owns its cwd, so it is the right place to guarantee it. A
+        creation failure is left to surface from the spawn itself rather than
+        raising a second, less specific error here.
+        """
+        try:
+            self._work_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     def _argv(self) -> list[str]:
         assert self._resolved is not None
@@ -213,6 +241,35 @@ class CodebrainProvider(LLMProvider):
                 # this variable; without it a strict-identity tool refuses rather
                 # than acting on the wrong session.
                 env["KIROCREW_SESSION_KEY"] = self._session_key
+                # ...and the KEY ALONE is not enough. The gateway refuses a
+                # tool-policy read that carries no signed token
+                # (`identity_unattested`), so the seam that mints one -- the same
+                # pair cron uses for its own stub sessions -- has to run here too.
+                # Without it every control-plane tool is reported "unavailable",
+                # which a model narrates as "agent started" over a refusal.
+                token = self._session_token()
+                if token:
+                    env[_STUB_SESSION_TOKEN_ENV] = token
+            # The gateway PORT, and it is not optional. A `-c mcp_servers.*.env`
+            # table REPLACES the child's environment rather than extending it, so
+            # a server given only KIROCREW_HOME resolves the port from its own
+            # default (5476) and presents THIS instance's credential to whichever
+            # gateway owns that port. The failure is not a missing-port error --
+            # it is "this client authenticated against the wrong Kiro Crew
+            # instance", which reads like a credential bug and is really a lost
+            # env var. Read from the live process because that is where the
+            # launcher put it; the config module's constant is the same value
+            # resolved at import.
+            port = os.environ.get("KIROCREW_PORT", "")
+            if not port:
+                try:
+                    from kiro_crew.config.loader import DASHBOARD_PORT
+
+                    port = str(DASHBOARD_PORT)
+                except Exception:
+                    port = ""
+            if port:
+                env["KIROCREW_PORT"] = port
             inline_env = ", ".join(f"{k}={json.dumps(v)}" for k, v in env.items())
             overrides.extend(
                 [
@@ -230,6 +287,30 @@ class CodebrainProvider(LLMProvider):
                 ]
             )
         return overrides
+
+    def _session_token(self) -> str:
+        """A signed token proving which session the mounted MCP servers act for.
+
+        Minted once per provider and re-published on each read, mirroring the
+        gateway's own ``session/new`` publication: the mapping file is what the
+        verifier reads, and re-publishing is how a still-running child stays
+        attested. Retracted in :meth:`shutdown`.
+
+        Never raises: a provider that cannot mint a token still serves the turn,
+        with the control-plane tools refusing rather than acting unattested.
+        """
+        if not self._session_key:
+            return ""
+        try:
+            from kiro_crew.mcp_gateway.claim import mint_stub_session_token
+            from kiro_crew.session_token_sig import publish_session_token
+
+            if not self._stub_token:
+                self._stub_token = mint_stub_session_token()
+            publish_session_token(self._stub_token, self._session_key)
+            return self._stub_token
+        except Exception:
+            return ""
 
     @staticmethod
     def _valid_env_key(key: object) -> bool:
@@ -351,6 +432,16 @@ class CodebrainProvider(LLMProvider):
         if item_type in ("mcp_tool_call", "command_execution", "local_shell_call", "web_search"):
             call_id = str(item.get("id") or "")
             title = self._call_title(item, item_type)
+            # The host reads tool IDENTITY off dedicated fields, not off `title`:
+            # `is_coding_event`, the crew log, the SEL invocation record and the
+            # per-turn identity tracker all take `tool_name` / `mcp_server_name`.
+            # Leaving them empty makes a real MCP call arrive as an unnamed tool,
+            # so it is classified as nothing and tracked under an empty identity.
+            server = item.get("server")
+            tool_name = item.get("tool") or item.get("name")
+            server = server if isinstance(server, str) else ""
+            tool_name = tool_name if isinstance(tool_name, str) else item_type
+            is_shell = item_type in ("command_execution", "local_shell_call")
             if kind == "item.started":
                 return [
                     LLMEvent(
@@ -358,6 +449,9 @@ class CodebrainProvider(LLMProvider):
                         tool_call_id=call_id,
                         title=title,
                         wire_title=title,
+                        tool_name=tool_name,
+                        mcp_server_name=server,
+                        is_shell=is_shell,
                         tool_kind="mcp" if item_type == "mcp_tool_call" else "execute",
                         tool_input=self._call_input(item),
                     )
@@ -370,14 +464,21 @@ class CodebrainProvider(LLMProvider):
                         tool_call_id=call_id,
                         title=title,
                         wire_title=title,
+                        tool_name=tool_name,
+                        mcp_server_name=server,
+                        is_shell=is_shell,
                         tool_kind="mcp" if item_type == "mcp_tool_call" else "execute",
-                        # The RESULT BODY, not just the verdict. Carrying only the
-                        # status is what let a refused call look like a successful
-                        # one: the model narrates "agent started" from a refusal
-                        # the host never displayed, and the user sees a tool pill
-                        # with no output and no error. The status leads so a
-                        # failure is legible even when the body is empty.
-                        text=self._call_result_text(item, status),
+                        # ``tool_output`` -- NOT ``text``. The host persists this
+                        # field into the tool message's ``meta.output``, and that
+                        # is what the transcript's own renderers parse: the
+                        # sub-agent launch card matches "Spawned N subagent(s)."
+                        # there, so a result delivered as ``text`` renders as
+                        # assistant prose and the card never appears even though
+                        # the spawn succeeded. ``tool_status`` carries the verdict
+                        # and ``tool_final`` marks this as the terminal update.
+                        tool_output=self._call_result_text(item, status),
+                        tool_status=status,
+                        tool_final=True,
                     )
                 ]
         return []
@@ -558,6 +659,16 @@ class CodebrainProvider(LLMProvider):
             return
         self._closed = True
         await self.cancel(wait_ack_timeout=1.0)
+        # Retract the identity mapping: a surviving record would let a later
+        # process holding the same token still answer as this session.
+        if self._stub_token:
+            try:
+                from kiro_crew.session_token_sig import retract_session_token
+
+                retract_session_token(self._stub_token)
+            except Exception:
+                pass
+            self._stub_token = ""
 
 
 __all__ = ["CodebrainProvider"]

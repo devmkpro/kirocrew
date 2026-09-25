@@ -146,6 +146,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { i18nT } from '../i18n/t'
 import { fmtDateFields, fmtPercent } from '../i18n/format'
 import SessionRefStrip from './SessionRefStrip'
+import SubagentModelChip from './SubagentModelChip'
 import type { SessionRef } from '../utils/sessionRefs'
 import { activeElementIsEditable, isEditableTarget } from '../utils/editableTarget'
 const INPUT_MIN_H = 44
@@ -5230,6 +5231,11 @@ function ChatInput({
               )}
             </button>
           )}
+          {/* Sibling of the model chip, and only where that chip itself renders:
+              the pair reads as "conversation model / delegated-work model". The
+              control is self-contained (it writes agent.role_models.subagent
+              directly) so it adds no props to this component's surface. */}
+          {onModelClick && modelName && <SubagentModelChip disabled={isRunning} />}
           </div>
         </div>
       )}

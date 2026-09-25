@@ -129,6 +129,32 @@ export function CodebrainPanel() {
     () => (providers.data?.registry ?? []).filter(p => p.isVirtual),
     [providers.data],
   )
+
+  // Sub-agent model, read from and written to the SAME config key the composer
+  // chip and Settings > Chat use, so the three cannot disagree.
+  const cfg = useQuery({ queryKey: ['kirocrew-config'], queryFn: () => api.kirocrewConfig() })
+  const modelList = useQuery({ queryKey: ['models'], queryFn: () => api.models() })
+  const subagentModel =
+    (cfg.data as { agent?: { role_models?: Record<string, string> } } | undefined)?.agent
+      ?.role_models?.subagent || 'auto'
+  const subagentModelOptions = useMemo(() => {
+    const list = Array.isArray(modelList.data)
+      ? (modelList.data as { model_name?: string }[])
+          .map(m => String(m.model_name || ''))
+          .filter(Boolean)
+      : []
+    const out = list.includes('auto') ? [...list] : ['auto', ...list]
+    // Keep a pin the backend no longer advertises selectable, or rendering the
+    // select would silently move the stored value to the first option.
+    if (!out.includes(subagentModel)) out.unshift(subagentModel)
+    return out
+  }, [modelList.data, subagentModel])
+  const saveSubagentModel = useMutation({
+    mutationFn: (model: string) =>
+      api.patchConfig('agent.role_models.subagent', model === 'auto' ? '' : model),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['kirocrew-config'] }),
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
+  })
   const rows = drafts ?? []
   const usedIds = new Set(rows.map(r => r.id))
 
@@ -192,8 +218,36 @@ export function CodebrainPanel() {
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection title="Endpoint providers">
+      <SettingsSection title="Sub-agent model">
         <SettingsCard index={1}>
+          <PanelSectionHeader label="Model for delegated work" />
+          <p className="text-[12px] text-muted mb-2">
+            The model sub-agents run on, written to <code>agent.role_models.subagent</code> — the
+            same key the chip beside the composer's model picker edits. <code>auto</code> lets the
+            provider choose; it does NOT inherit the chat model, so delegated work never silently
+            rides the interactive flagship.
+          </p>
+          <select
+            aria-label="Sub-agent model"
+            className="bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1 text-[13px] min-w-[220px]"
+            value={subagentModel}
+            onChange={e => saveSubagentModel.mutate(e.target.value)}
+            disabled={saveSubagentModel.isPending}
+          >
+            {subagentModelOptions.map(model => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+          {saveSubagentModel.isError && (
+            <p className="text-[12px] text-danger mt-1">Could not save the sub-agent model.</p>
+          )}
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title="Endpoint providers">
+        <SettingsCard index={2}>
           <PanelSectionHeader label="Your providers" count={rows.length} />
           <p className="text-[12px] text-muted mb-2">
             An endpoint profile routes a CLI at another provider by environment — base URL plus a
