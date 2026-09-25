@@ -99,6 +99,37 @@ _SCHEMA = (
     "CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id, state)",
     # Per-lane dispatch heads (fairness lanes).
     "CREATE INDEX IF NOT EXISTS tasks_lane ON tasks(lane, state, next_run_at, created_at)",
+    # Agent-to-agent inbox. Lives in THIS database, not a new one, for the single
+    # property the feature turns on: a message must be committed before its
+    # recipient is woken, and this store already owns the lock, ``BEGIN
+    # IMMEDIATE``, the busy timeout and the off-loop guard that make that atomic.
+    # It is deliberately NOT the ``tasks`` table -- a recado is not a unit of
+    # dispatchable work and must never be leased, retried or counted against a
+    # fairness lane.
+    #
+    # ``SCHEMA_VERSION`` is NOT bumped for this. Every statement here is
+    # ``IF NOT EXISTS``, so the table appears on the next open of any store, and
+    # an older build simply ignores a table whose columns it never reads --
+    # nothing it writes can corrupt these rows. Stamping a higher version would
+    # instead make that older build REFUSE a store it is in fact compatible with,
+    # turning a harmless downgrade into an outage. The version moves when a shape
+    # an old writer could damage changes.
+    """
+    CREATE TABLE IF NOT EXISTS agent_inbox_messages (
+      id TEXT PRIMARY KEY,
+      recipient_session_key TEXT NOT NULL,
+      sender_session_key TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at REAL NOT NULL,
+      read_at REAL
+    )
+    """,
+    # The one query the reader runs: unread for one recipient, oldest first. The
+    # column order is the lookup order -- recipient, then unread, then FIFO -- so
+    # the claim is an index scan and two readers contend for the same rows for as
+    # short a time as possible.
+    "CREATE INDEX IF NOT EXISTS agent_inbox_unread "
+    "ON agent_inbox_messages(recipient_session_key, read_at, created_at, id)",
 )
 
 
