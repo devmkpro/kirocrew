@@ -11261,6 +11261,15 @@
         "could_not_sign_out": "[Çøùĺð ñøţ şìğñ øùţ ················]",
         "keep_current_sign_in": "[Ķèèþ ţĥè çùŕŕèñţ şìğñ-ìñ ·················]",
         "signed_in_body_no_refresh": "[Àğèñţş ŕùñ àş ţĥìş Ķìŕø àççøùñţ. Ţĥìş şìğñ-ìñ ĥàş ñø ŕèƒŕèşĥ ţøķèñ, şø ìţ çàññøţ ŕèñèẁ ìţşèĺƒ — şìğñ ìñ àğàìñ ƀèƒøŕè ìţ èẋþìŕèş. ······································]"
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

@@ -16,6 +16,7 @@ import LocalStorageDebug from './LocalStorageDebug'
 import { McpManagement } from './settings/McpManagement'
 import { KiroCrewCfgTab, AgentCfgTab } from './overview'
 import { AgentBackendTab } from './developer/AgentBackendTab'
+import { AgentCliCard } from './developer/AgentCliCard'
 import { DebugToolsTab } from './developer/DebugToolsTab'
 
 /**
@@ -148,7 +149,7 @@ export default function DeveloperPage() {
             <AgentCfgTab />
           </>
         )}
-        {tab === 'agent-backend' && <AgentBackendTab />}
+        {tab === 'agent-backend' && <><AgentBackendTab /><AgentCliCard /></>}
         {tab === 'debug-tools' && <DebugToolsTab />}
         {tab === 'archive' && <SessionArchive />}
       </>}

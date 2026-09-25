@@ -11616,6 +11616,15 @@
         "could_not_sign_out": "সাইন আউট করা যায়নি",
         "keep_current_sign_in": "বর্তমান সাইন-ইন রাখুন",
         "signed_in_body_no_refresh": "এজেন্টগুলি এই Kiro অ্যাকাউন্ট হিসেবে চলে। এই সাইন-ইনে রিফ্রেশ টোকেন নেই, তাই এটি নিজে নবায়ন হতে পারে না — মেয়াদ শেষ হওয়ার আগে আবার সাইন ইন করুন।"
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

@@ -6918,6 +6918,15 @@
         "artifact_deploy": "Artifact Deploy",
         "artifact_deploy_desc": "Publish an artifact to a public HTTPS URL in your own AWS account. Off by default: every deploy spends money in your account and serves the content on the open internet.",
         "open_artifact_deploy": "Open Artifact Deploy"
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

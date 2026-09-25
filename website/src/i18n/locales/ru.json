@@ -11950,6 +11950,15 @@
         "could_not_sign_out": "Не удалось выйти",
         "keep_current_sign_in": "Оставить текущий вход",
         "signed_in_body_no_refresh": "Агенты работают от имени этого аккаунта Kiro. У этого входа нет refresh-токена, и он не может обновиться сам — войдите снова до истечения срока."
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

@@ -11783,6 +11783,15 @@
         "could_not_sign_out": "Déconnexion impossible",
         "keep_current_sign_in": "Conserver la connexion actuelle",
         "signed_in_body_no_refresh": "Les agents s’exécutent avec ce compte Kiro. Cette connexion n’a pas de jeton de rafraîchissement et ne peut pas se renouveler seule — reconnectez-vous avant son expiration."
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

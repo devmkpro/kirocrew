@@ -11616,6 +11616,15 @@
         "could_not_sign_out": "Abmelden nicht möglich",
         "keep_current_sign_in": "Aktuelle Anmeldung behalten",
         "signed_in_body_no_refresh": "Agenten laufen unter diesem Kiro-Konto. Diese Anmeldung hat kein Refresh-Token und kann sich nicht selbst erneuern – melde dich vor dem Ablauf erneut an."
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

@@ -11449,6 +11449,15 @@
         "could_not_sign_out": "로그아웃할 수 없음",
         "keep_current_sign_in": "현재 로그인 유지",
         "signed_in_body_no_refresh": "에이전트는 이 Kiro 계정으로 실행됩니다. 이 로그인에는 리프레시 토큰이 없어 자동으로 갱신되지 않습니다. 만료되기 전에 다시 로그인하세요."
+      },
+      "agentCliCard": {
+        "title": "Agent CLIs on this machine",
+        "description": "Which vendor CLI can be launched here. Claude and Codex hold their own credential, so no API key is asked for.",
+        "found_count": "Detected",
+        "state_found": "found",
+        "state_missing": "not installed",
+        "could_not_probe": "Could not probe this host for agent CLIs.",
+        "probing": "Probing this host…"
       }
     },
     "developerPage": {

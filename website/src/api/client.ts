@@ -1,3 +1,13 @@
+export interface AgentCliRow {
+  id: string
+  display: string
+  binary: string
+  installed: boolean
+  path: string
+  install_hint: string
+  credential_note: string
+}
+
 import { installSessionExpiryHandler } from './sessionExpirySignal'
 import { chatSlotDetailPath } from './chatSlotPaths'
 import { resizeImageForModel, type ResizeInfo } from '../utils/resizeImage'
@@ -4373,6 +4383,9 @@ export const api = {
   // caller as a rejection, which is the intended signal: "no probe information",
   // to be treated as fail-open rather than as a verdict.
   acpBackends: () => fetch('/api/acp-backends').then(j) as Promise<{ backends: AcpBackendProbe[] }>,
+  // Which vendor agent CLI this HOST can launch (claude, codex, ...). Reports
+  // absent ones too, each with its install hint -- see the gateway handler.
+  agentClis: () => fetch('/api/agent-clis').then(j) as Promise<{ agent_clis: AgentCliRow[] }>,
   // Re-take ONE backend's verdict with this gateway's cached absence dropped first,
   // and answer with that backend's row in the shape `acpBackends` sends -- so the
   // caller splices it into the list it already holds rather than keeping a second
