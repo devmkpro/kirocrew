@@ -26,6 +26,7 @@ from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
 from kiro_crew.dashboard.origin import check_origin, mark_audit_claimed
 from kiro_crew.executors import discovery_executor, subprocess_executor
 from kiro_crew.hooks import validate_file_path
+from kiro_crew.dashboard import agent_cli
 from kiro_crew.sandbox import _PYTHON_ENV_PREFIXES, RLIMIT_PROFILE_NONE, spawn_shim_argv
 from kiro_crew.security import (
     is_sensitive_path,
@@ -2442,6 +2443,65 @@ async def api_terminal_list(request: web.Request) -> web.Response:
         resources=f"count={len(sessions)}",
     )
     return web.json_response({"enabled": True, "sessions": sessions})
+
+
+async def api_agent_clis(request: web.Request) -> web.Response:
+    """GET /api/agent-clis — which vendor agent CLIs this host can launch.
+
+    Feeds the provider page: one row per CLI Kiro Crew declares launchable, with
+    whether its binary resolves here, its absolute path when it does, and where
+    that CLI keeps its own credential. The allowlist and the resolution live in
+    :mod:`kiro_crew.dashboard.agent_cli`; this handler only reports.
+
+    Owner-gated like the rest of this module, but deliberately NOT gated on the
+    terminal feature flag. The answer is about the HOST, not about a PTY: the
+    provider page needs it to say "Codex found, Claude missing" whether or not the
+    terminal panel is switched on, and a picker that went blank because an
+    unrelated feature was off would be a worse answer than the truth.
+
+    Reports absent CLIs too, which is the whole point -- see :func:`agent_cli.detect`.
+    Nothing here can launch anything, so the response carries no argv: a caller
+    that wants to RUN one names its id, and the server resolves the program.
+    """
+    caller = request.get("user")
+    if not caller:
+        _sel().log_api_access(
+            caller="unknown",
+            operation="agent_clis.list",
+            outcome="denied",
+            source="dashboard",
+            resources=str(request.remote),
+        )
+        return web.Response(status=401, text="Unauthorized")
+    owner_denied = await require_owner_dashboard_request(request, "agent_clis.list")
+    if owner_denied is not None:
+        return owner_denied
+
+    # Off-loop for the reason `agent_cli.resolve` documents: the probe stats every
+    # PATH entry, and this endpoint is polled by a settings page.
+    rows = await asyncio.get_running_loop().run_in_executor(
+        discovery_executor(), agent_cli.detect,
+    )
+    payload = [
+        {
+            "id": row.id,
+            "display": row.display,
+            "binary": row.binary,
+            "installed": row.installed,
+            "path": row.path,
+            "install_hint": row.install_hint,
+            "credential_note": row.credential_note,
+        }
+        for row in rows
+    ]
+    _sel().log_api_access(
+        caller=caller,
+        operation="agent_clis.list",
+        outcome="ok",
+        source="dashboard",
+        resources=f"installed={sum(1 for r in rows if r.installed)}/{len(rows)}",
+    )
+    return web.json_response({"agent_clis": payload})
 
 
 async def reap_orphaned_terminals(app: web.Application) -> None:

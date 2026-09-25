@@ -46,6 +46,7 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/ws/terminal/{session_id}", handlers.api_terminal_ws)
     app.router.add_post("/api/terminal/sessions", handlers.api_terminal_create)
     app.router.add_get("/api/terminal/sessions", handlers.api_terminal_list)
+    app.router.add_get("/api/agent-clis", handlers.api_agent_clis)
     app.router.add_post("/api/terminal/redact", handlers.api_terminal_redact)
     app.router.add_post("/api/terminal/complete", handlers.api_terminal_complete)
     app.router.add_delete("/api/terminal/sessions/{session_id}", handlers.api_terminal_delete)
