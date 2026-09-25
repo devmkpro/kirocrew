@@ -246,6 +246,29 @@ def coerce_deepseek_env(raw: object) -> dict[str, str]:
     }
 
 
+def coerce_provider_base_urls(raw: object) -> dict[str, str]:
+    """Normalize ``agent.provider_base_urls`` to an env-var-name -> URL mapping.
+
+    TYPE coercion ONLY, mirroring :func:`coerce_deepseek_env` and for the same
+    reason: what a name and a URL may BE for this mapping -- a POSIX identifier,
+    an ``https://`` endpoint, not a ``secret://`` reference smuggling a credential
+    through the public field -- is checked at SPAWN, in the DeepSeek arm, where a
+    bad entry REFUSES the session with a message naming the offending env-var key
+    (``acp/client.py``). Dropping the entry here instead would hand the operator a
+    harness pointed at the provider's default endpoint, a config file whose entry
+    silently vanished on the next write, and no error naming why.
+
+    Nothing is stripped: a name with surrounding whitespace is not a POSIX
+    identifier, and the spawn-time refusal says so by name rather than quietly
+    repairing it into a different variable than the operator wrote.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value for key, value in raw.items() if isinstance(key, str) and isinstance(value, str)
+    }
+
+
 def coerce_effort(raw: object) -> str:
     """Normalize ONE reasoning-effort value to a level, or ``""`` for inherit.
 
@@ -1057,6 +1080,32 @@ class AgentConfig:
             "starts with a message naming the offending key. Empty means no key: "
             "a model served locally on this machine needs none. Ignored by every "
             "other backend.",
+        ),
+    )
+    provider_base_urls: dict[str, str] = field(
+        default_factory=dict,
+        metadata=_meta(
+            "Provider base URLs",
+            "Non-secret endpoint overrides handed to the DeepSeek Harness "
+            "('deepseek' backend) as environment variables at spawn, mapping an "
+            "environment-variable NAME to a literal https:// URL. This is the "
+            "companion to 'deepseek_env' and exists because that mapping cannot "
+            "carry a URL: it takes a 'secret://<vault name>' reference only, and "
+            "its validator additionally REQUIRES each name to match the harness's "
+            "child-scrub class (KEY|PASSWORD|SECRET|TOKEN) -- the property that "
+            "proves the harness withholds the name from the shells it spawns. A "
+            "base URL is not a credential, does not belong in the vault, and does "
+            "not match that class, so it needs its own declaredly-PUBLIC field "
+            "rather than a hole in the credential one. Together they reach an "
+            "OpenAI-compatible provider: map the key in 'deepseek_env' as "
+            '{\"OPENAI_API_KEY\": \"secret://my-key\"} and the endpoint here as '
+            '{\"OPENAI_BASE_URL\": \"https://openrouter.ai/api/v1\"}. Only https:// '
+            "is accepted -- a plaintext endpoint would send the provider key over "
+            "the wire unencrypted -- and, since these values ARE forwarded to the "
+            "harness's shell children, never map a name whose value is sensitive; "
+            "a 'secret://' reference here is refused at spawn precisely so a "
+            "credential is not smuggled through the public field. Empty means the "
+            "provider's own default endpoint. Ignored by every other backend.",
         ),
     )
     sweep_agents_backups: bool = field(

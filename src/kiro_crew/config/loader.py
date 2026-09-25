@@ -2682,6 +2682,9 @@ def _build_agent_config(agent_data: dict) -> AgentConfig:
         # so a new name joins it only by being an old one. Same shape as
         # ``coerce_refusal_fallback_model`` above.
         deepseek_env=_sections.coerce_deepseek_env(agent_data.get("deepseek_env")),
+        provider_base_urls=_sections.coerce_provider_base_urls(
+            agent_data.get("provider_base_urls")
+        ),
         sweep_agents_backups=_safe_bool(agent_data.get("sweep_agents_backups", False), False),
         sandbox=agent_data.get("sandbox", "auto"),
         sandbox_allow_no_isolation=bool(agent_data.get("sandbox_allow_no_isolation", False)),

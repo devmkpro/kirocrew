@@ -1537,6 +1537,108 @@ def _deepseek_vault_env() -> tuple[dict[str, str], tuple[str, ...]]:
     return resolved, tuple(sorted(secret_keys))
 
 
+def _validate_provider_base_url_mapping(mapping: dict[str, str]) -> None:
+    """Refuse every ``agent.provider_base_urls`` entry the harness would not honour.
+
+    Raises :exc:`ValueError` whose message names ONLY the env-var KEY, never the
+    value, for the same reason :func:`_validate_deepseek_env_mapping` does: the key
+    is operator-declared config and ``!r`` escapes any control character in it, so
+    the message is safe on a log and in a chat error card.
+
+    The rules are deliberately NOT the credential mapping's rules, because this
+    field holds the opposite kind of value. ``deepseek_env`` requires a
+    ``secret://`` reference and requires each name to match the harness's
+    child-scrub class (:data:`_DEEPSEEK_ENV_CHILD_SCRUB_CLASS`) -- the property
+    proving the harness withholds the name from the shells it spawns. A base URL
+    satisfies neither and needs neither: it is not a credential, so it does not
+    belong in the vault, and it is harmless in a child shell. What this validator
+    must instead guarantee is the inverse -- that the PUBLIC field is not used to
+    smuggle a credential past the credential field's protections:
+
+    * a ``secret://`` reference is refused: a value that needs the vault needs
+      ``deepseek_env``, whose child-scrub rule keeps it out of the model's bash
+      tool, and resolving one here would forward the plaintext to those shells;
+    * a name inside the child-scrub class is refused for the same reason from the
+      other direction -- an operator writing ``OPENAI_API_KEY`` here has put a key
+      in the public field, and the entry that LOOKS like it works is the dangerous
+      one;
+    * a non-``https://`` endpoint is refused: the provider key from
+      ``deepseek_env`` travels to this URL, and plaintext http would put it on the
+      wire in the clear;
+    * the same POSIX-identifier grammar, reserved-prefix and Crew-owned-name rules
+      as the credential mapping apply, because a name the harness cannot resolve,
+      or one Crew overwrites after this injection, fails silently either way.
+    """
+    scrub_prefixes = agent_env_scrub_prefixes()
+    for key, value in mapping.items():
+        if value.startswith(SECRET_URI_PREFIX):
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} holds a "
+                f"'{SECRET_URI_PREFIX}' reference. This mapping is for NON-secret "
+                "endpoints and its values ARE forwarded to the shells the harness "
+                "spawns, so resolving a secret here would hand the model's bash "
+                "tool the value. Map a credential under agent.deepseek_env instead."
+            )
+        if _DEEPSEEK_ENV_CHILD_SCRUB_CLASS.search(key):
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} names a credential-shaped "
+                "variable (its name matches KEY/PASSWORD/SECRET/TOKEN). Values in "
+                "this mapping are public and reach the harness's shell children; a "
+                "credential belongs in agent.deepseek_env, which withholds it from "
+                "them."
+            )
+        if not value.startswith("https://"):
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} is not an https:// URL. "
+                "The provider key from agent.deepseek_env is sent to this endpoint, "
+                "so a plaintext endpoint would put it on the wire unencrypted."
+            )
+        if not _DEEPSEEK_ENV_NAME_GRAMMAR.fullmatch(key):
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} is not an "
+                "environment-variable name the harness can resolve: it takes POSIX "
+                "shell identifiers, matching [A-Za-z_][A-Za-z0-9_]*."
+            )
+        if key.startswith(_DEEPSEEK_ENV_RESERVED_PREFIXES) or key in _DEEPSEEK_ENV_CREW_OWNED_NAMES:
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} names a variable Kiro Crew "
+                "or the harness sets on this child itself (the DSH_ and KIROCREW_ "
+                "namespaces, and Kiro Crew's own session credentials), so the "
+                "mapping would be overwritten or would overwrite them."
+            )
+        if key.startswith(tuple(scrub_prefixes)):
+            raise ValueError(
+                f"agent.provider_base_urls entry {key!r} matches Kiro Crew's agent "
+                "environment scrub, which runs on the shared spawn tail AFTER this "
+                "injection, so the harness would start without the endpoint and "
+                "nothing would say why."
+            )
+
+
+def _provider_base_url_env() -> dict[str, str]:
+    """``agent.provider_base_urls`` validated into child env vars.
+
+    The non-secret companion to :func:`_deepseek_vault_env`. No vault is opened and
+    nothing is returned holding plaintext that needs clearing, because every value
+    here is public by contract -- which is exactly what the validator enforces.
+
+    Every failure is a :exc:`ValueError`, matching the credential arm so the caller
+    does the same thing with both: refuse the session rather than start a harness
+    pointed at the wrong endpoint.
+
+    Blocking: reads the config file, so it runs off the event loop. Config is
+    imported lazily for this module's usual reason -- ``config.loader`` reaches this
+    module through ``acp.session_handle``.
+    """
+    from kiro_crew.config.loader import KiroCrewConfig
+
+    mapping = dict(KiroCrewConfig.load().agent.provider_base_urls)
+    if not mapping:
+        return {}
+    _validate_provider_base_url_mapping(mapping)
+    return mapping
+
+
 def _pi_gate_extension_bytes(payload: bytes) -> bytes:
     """*payload* in the one form the digest is pinned over: LF line endings.
 
@@ -9145,6 +9247,29 @@ class AcpClient:
             # harness withholds the variable from its own shells by name CLASS, not
             # by a list Crew hands it, and nothing on this side reads them later.
             deepseek_env.clear()
+            # The non-secret companion, resolved AFTER the credential so a misplaced
+            # entry cannot shadow a real key, and inside the same arm for the same
+            # reason (harness-parity H13). Its validator already refused a
+            # ``secret://`` value and any credential-shaped NAME, so nothing here
+            # holds plaintext to clear -- these values are public by contract and
+            # the harness is free to forward them to its own shells.
+            #
+            # Off-loop: reads config.json. Guarded: the sandbox temp file is live, so
+            # a cancellation here must not orphan it. A refusal takes the same arm as
+            # the credential one below, because the operator-visible outcome is the
+            # same -- a harness that cannot reach the intended model.
+            try:
+                env.update(await self._to_thread_guarding_sandbox(_provider_base_url_env))
+            except ValueError as exc:
+                try:
+                    acp_tool_gate.enforce_runtime_routing(
+                        self.backend,
+                        str(exc),
+                        remedy=acp_tool_gate.remediation_for(self.backend),
+                    )
+                except acp_tool_gate.ToolGateUnroutable as gate_exc:
+                    raise AcpUnavailable(str(gate_exc)) from exc
+                raise AcpUnavailable(str(exc)) from exc
             # NOT given to the read-back probe, which boots the plugin and exits: it
             # needs no provider key, so it is never handed one.
         self._apply_session_identity_env(env)

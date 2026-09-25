@@ -1,0 +1,37 @@
+{
+  "name": "codebrain-tools",
+  "version": "0.1.0",
+  "displayName": "Codebrain Tools",
+  "description": "Expõe as tools MCP do Codebrain (fetch/scraping e automação de browser via CDP) dentro do KiroCrew, executando o daemon headless do Codebrain por stdio.",
+  "author": "devmkpro",
+  "license": "MIT",
+  "mcpServers": {
+    "codebrain": {
+      "command": "node",
+      "args": [
+        "/home/mk/Downloads/two_projects/codebrain/packages/mcp/stdio.js"
+      ],
+      "env": {
+        "CODEBRAIN_WORKSPACE": "${PROJECT_DIR}"
+      },
+      "disabledTools": [
+        "browser_eval",
+        "pane_spawn",
+        "pane_write",
+        "pane_read",
+        "pane_send_message",
+        "pane_read_messages",
+        "memory_write",
+        "memory_read",
+        "memory_search",
+        "memory_list",
+        "memory_delete",
+        "memory_stats",
+        "memory_graph",
+        "memory_rank",
+        "memory_similar",
+        "file_write"
+      ]
+    }
+  }
+}
