@@ -991,7 +991,11 @@ class AgentConfig:
     )
     provider: str = field(
         default="acp",
-        metadata=_meta("Provider", "LLM provider backend (KiroACP / kiro-cli).", enum=["acp"]),
+        metadata=_meta(
+            "Provider",
+            "LLM provider backend (KiroACP / kiro-cli, or direct Codebrain-style CLI).",
+            enum=["acp", "codebrain"],
+        ),
     )
     mcp_registry_mode: bool = field(
         default=False,
@@ -1191,6 +1195,24 @@ class AgentConfig:
             "the opt-in where the default is fail-closed and stating the exposure plus "
             "offering the opt-out where it is allow, and writes nothing unless the "
             "operator answers yes.",
+        ),
+    )
+    sandbox_allow_unmasked_enforced_adapters: bool = field(
+        default=False,
+        metadata=_meta(
+            "Allow Unmasked Enforced Adapters",
+            "When true, an enforced-permission-route adapter (Codex, Claude Code) may "
+            "spawn even though its OS-level credential mask will NOT be applied — the "
+            "refusal agent_sdk.tool_gate.enforce_sandbox_floor normally raises becomes "
+            "a warning. Distinct from sandbox_allow_unsandboxed_exec, which decides "
+            "whether an unsandboxed child runs AT ALL: this decides whether an adapter "
+            "that SELF-APPROVES its own tool calls may run without the mask that is "
+            "the compensating control for that self-approval, so its passive "
+            "credential reads reach ~/.aws, ~/.ssh and the token stores unfenced. "
+            "Off by default, and deliberately a separate key so enabling one exposure "
+            "cannot silently enable the other. Irrelevant to agent.provider="
+            "'codebrain', which does not construct an ACP runtime and never reaches "
+            "this floor.",
         ),
     )
     apps_allow_third_party: bool = field(

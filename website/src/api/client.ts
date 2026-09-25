@@ -3200,6 +3200,43 @@ export interface SecretsListResponse {
   managed_error?: boolean
 }
 
+/** One Codebrain-style provider profile as the dashboard may see it.
+ *  `hasToken` is presence only — the token itself never crosses the boundary. */
+export interface CodebrainProvider {
+  id: string
+  label: string
+  type: string
+  host: string
+  models: string[]
+  baseUrl: string
+  tokenEnvVar: string
+  isVirtual: boolean
+  detected: boolean
+  hasToken: boolean
+}
+
+export interface CodebrainProvidersResponse {
+  storePath: string
+  detectedHosts: string[]
+  /** Known profile templates, shipped with the build. */
+  registry: CodebrainProvider[]
+  /** The user's own saved profiles. */
+  providers: CodebrainProvider[]
+}
+
+/** A profile being saved. `token` is write-only and optional: omit it to keep
+ *  whatever the store already holds. */
+export interface CodebrainProviderInput {
+  id: string
+  label: string
+  type: string
+  host: string
+  models?: string[]
+  baseUrl?: string
+  tokenEnvVar?: string
+  token?: string
+}
+
 export const api = {
   status: () => fetch('/api/status').then(j),
   tunnelStatus: () => fetch('/api/tunnel/status').then(j) as Promise<TunnelStatus>,
@@ -3462,6 +3499,13 @@ export const api = {
   governancePolicy: () => get('/api/governance/policy').then(j) as Promise<GovernancePolicyData>,
   suggestions: (force?: boolean) => fetch(`/api/suggestions${force ? '?force=1' : ''}`).then(j) as Promise<{ suggestions: string[]; generated_at: number; stale: boolean }>,
   branding: () => fetch('/api/dashboard/branding').then(j) as Promise<{ bot_name: string; avatar: string; direct_local?: boolean }>,
+  // Settings > Codebrain. The GET never carries token material (the backend
+  // reports `hasToken` only), and a save that omits `token` keeps the stored
+  // one — so a round-trip through this UI cannot blank a key it cannot read.
+  codebrainProviders: () =>
+    fetch('/api/codebrain/providers').then(j) as Promise<CodebrainProvidersResponse>,
+  saveCodebrainProviders: (providers: CodebrainProviderInput[]) =>
+    post('/api/codebrain/providers', { providers }).then(j) as Promise<{ ok: boolean; saved: number }>,
   // Instances (multi-instance management) — owner-only, gated by instances.enabled.
   // listInstances throws ApiError(403) when the feature is disabled; callers
   // should catch and render the enable toggle rather than an error. `active`

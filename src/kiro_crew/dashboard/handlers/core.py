@@ -2366,7 +2366,7 @@ def _selectable_acp_backends() -> list[str]:
 
 
 _EDITABLE_CONFIG: dict[str, dict] = {
-    "agent.provider": {"type": "enum", "values": ["acp"]},
+    "agent.provider": {"type": "enum", "values": ["acp", "codebrain"]},
     # Which ACP agent drives a session: "" = kiro-cli, "kas" = kiro-agent.
     # ``values_fn`` rather than a literal, because the set WIDENS after this module
     # is imported: an edition registers a backend from

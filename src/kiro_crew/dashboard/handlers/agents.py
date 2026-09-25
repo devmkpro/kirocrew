@@ -56,7 +56,7 @@ from kiro_crew.agent_discovery import (
 from kiro_crew.agent_files import KAS_RESERVED_AGENT_IDS
 from kiro_crew.agent_sdk.capabilities import capabilities_for, capabilities_of
 from kiro_crew.agent_sdk.drivers.acp import resolve_pin_spelling
-from kiro_crew.agent_sdk.provider_identity import is_claude_code
+from kiro_crew.agent_sdk.provider_identity import PROVIDER_CODEBRAIN, is_claude_code
 from kiro_crew.agent_spec_format import (
     agent_spec_candidates,
     is_markdown_spec,
@@ -2271,6 +2271,65 @@ def _scoped_default(cfg: Any, backend: str) -> str:
     )
 
 
+def _codebrain_models(configured_default: str = "") -> list[dict]:
+    """The model dropdown for the direct Codebrain-style provider seam.
+
+    Nothing is probed and nothing is spawned: a direct provider's models are a
+    property of the resolved PROFILE (a stored endpoint's catalog, or the native
+    CLI template's), so the list is read straight from the resolver the provider
+    itself will use. That is what makes the picker agree with what a turn can
+    actually run -- an ACP ``--list-models`` catalog would offer ids this seam
+    never sends.
+
+    Each row names its provider in the description, because one model id can be
+    served by several profiles (``claude-sonnet-4-6`` from Anthropic directly and
+    from OpenRouter) and the picker is the only place the user can see which one
+    a pin would mean. The rows are also the answer to "am I in Codebrain mode?" --
+    the mode is otherwise invisible from the composer.
+    """
+    from kiro_crew.providers.codebrain_resolver import get_resolver
+
+    rows: list[dict] = [
+        {
+            "model_name": "auto",
+            "display_name": "Auto",
+            "description": "Codebrain · provider default",
+        }
+    ]
+    seen: set[str] = {"auto"}
+    try:
+        providers = get_resolver().get_enhanced_providers()
+    except Exception:  # pragma: no cover - a broken store must not empty the picker
+        providers = []
+    for provider in providers:
+        for model in provider.models:
+            name = model.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            rows.append(
+                {
+                    "model_name": name,
+                    "display_name": name,
+                    # The separator matches the "Codebrain · " lead on `auto`, so
+                    # every row in this mode is self-identifying.
+                    "description": f"Codebrain · {provider.label}",
+                }
+            )
+    default = (configured_default or "").strip()
+    if default and default not in seen:
+        # A pin for a profile that is not currently detected still belongs in the
+        # list: dropping it would silently reselect `auto` and change what runs.
+        rows.append(
+            {
+                "model_name": default,
+                "display_name": default,
+                "description": "Codebrain · configured pin",
+            }
+        )
+    return rows
+
+
 async def api_models(request: web.Request) -> web.Response:
     """GET /api/models — the model list for the configured backend.
 
@@ -2279,6 +2338,16 @@ async def api_models(request: web.Request) -> web.Response:
     advertised, because neither accepts an id from that catalog.
     """
     cfg = await asyncio.to_thread(KiroCrewConfig.load)
+    # The direct seam is chosen at the PROVIDER level, above acp_backend, so it is
+    # tested first: in Codebrain mode there is no ACP adapter to advertise a
+    # catalog and the kiro-cli branch below would spawn a binary this seam never
+    # uses (and answer 503 on a signed-out host, which is what left the picker
+    # showing `auto` alone).
+    if getattr(cfg.agent, "provider", "") == PROVIDER_CODEBRAIN:
+        pinned = (getattr(cfg.agent, "model", "") or "").strip()
+        return web.json_response(
+            _codebrain_models(configured_default="" if pinned == "auto" else pinned)
+        )
     backend = getattr(cfg.agent, "acp_backend", "")
     if backend == ACP_BACKEND_CLAUDE:
         return web.json_response(
@@ -4731,7 +4800,7 @@ def _model_pin_rejected(model: str, request: web.Request, provider: str) -> str 
     # intentionally map away from. Its entitlement guard lives in its own
     # provider path, where full configured ids and bare advertised ids can be
     # canonicalized before comparison.
-    if is_claude_code(provider):
+    if is_claude_code(provider) or provider == "codebrain":
         return None
 
     # The registry knows each model under several spellings and only one is what

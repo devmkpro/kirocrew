@@ -63,6 +63,10 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/stream", handlers.api_stream)
     app.router.add_get("/api/sso-ttl", handlers.api_sso_ttl)
     app.router.add_get("/api/dashboard/branding", handlers.api_branding)
+    # Settings > Codebrain: the direct-provider profile store. GET is read-only
+    # and token-free; POST replaces the stored list.
+    app.router.add_get("/api/codebrain/providers", handlers.api_codebrain_providers)
+    app.router.add_post("/api/codebrain/providers", handlers.api_codebrain_providers_save)
     app.router.add_get("/api/health", handlers.api_health)
     # Authenticated, NOT a probe path: the version-equality gate for remote
     # execution reads it over an instance tunnel with the dashboard cookie.

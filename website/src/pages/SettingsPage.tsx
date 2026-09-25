@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Bell, Code, Fingerprint, Globe, History, Import, Info, Keyboard, KeyRound, Link2, MessageSquare, Mic, Palette, PanelsTopLeft, Plug, Server, ShieldCheck, Sparkles, SquareMousePointer, Webhook } from 'lucide-react'
+import { Bell, Code, Cpu, Fingerprint, Globe, History, Import, Info, Keyboard, KeyRound, Link2, MessageSquare, Mic, Palette, PanelsTopLeft, Plug, Server, ShieldCheck, Sparkles, SquareMousePointer, Webhook } from 'lucide-react'
 import { useAppSelector } from '../store'
 import SidePanelLayout from '../components/SidePanelLayout'
 import { SUBNAV_PARAM, SUBNAV_LEGACY_PARAMS, deleteSubSelection, toPathSegment, parsePathSegments } from '../components/subNavParams'
@@ -26,6 +26,7 @@ import { WebhooksPanel } from './settings/WebhooksPanel'
 import { PrivacyPanel } from './settings/PrivacyPanel'
 import { SecretsPanel } from './settings/SecretsPanel'
 import { ConnectionsPanel } from './settings/ConnectionsPanel'
+import { CodebrainPanel } from './settings/CodebrainPanel'
 import SettingsSearch from './settings/SettingsSearch'
 
 import { i18nT } from '../i18n/t'
@@ -67,6 +68,9 @@ function buildTabs() {
     { key: 'privacy', label: i18nT('privacyDisclosure.settingsLabel'), icon: <Fingerprint className="lucide-inline" />, group: GROUP_SYSTEM, description: i18nT('privacyDisclosure.settingsDescription') },
     { key: 'security', label: i18nT('settings.tabs.security.label'), icon: <ShieldCheck size={16} />, group: GROUP_SYSTEM, description: i18nT('settings.tabs.security.description'), hostsSubNav: true },
     { key: 'connections', label: i18nT('settings.tabs.connections.label'), icon: <Plug size={16} />, group: GROUP_SYSTEM, description: i18nT('settings.tabs.connections.description') },
+    // Codebrain is a PRODUCT NAME, not localizable copy, so the label is a
+    // literal and `labelOpaque` keeps it out of the i18n render scan.
+    { key: 'codebrain', label: 'Codebrain', labelOpaque: true, icon: <Cpu size={16} />, group: GROUP_SYSTEM, description: 'Direct native-CLI providers and endpoint profiles (OpenRouter, DeepSeek, MIMO).' },
     { key: 'secrets', label: i18nT('settings.tabs.secrets.label'), icon: <KeyRound size={16} />, group: GROUP_SYSTEM, description: i18nT('settings.tabs.secrets.description') },
     { key: 'developer', label: i18nT('settings.tabs.developer.label'), icon: <Code size={16} />, group: GROUP_SYSTEM, description: i18nT('settings.tabs.developer.description') },
     // The trailing divider fences off the entries that are not settings at all.
@@ -245,6 +249,7 @@ export default function SettingsPage() {
         {tab === 'privacy' && <PrivacyPanel />}
         {tab === 'security' && <SecurityPanel basePath={SETTINGS_BASE_PATH} />}
         {tab === 'connections' && <ConnectionsPanel />}
+        {tab === 'codebrain' && <CodebrainPanel />}
         {tab === 'secrets' && <SecretsPanel />}
         {tab === 'developer' && <DeveloperPanel />}
         {tab === 'releases' && <ReleasesPanel />}

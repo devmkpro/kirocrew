@@ -54,9 +54,13 @@ from __future__ import annotations
 #: an edition re-registers it.
 PROVIDER_CLAUDE_CODE = "claude_code"
 
-#: ``agent.provider`` value selecting the ACP family (kiro-cli and KAS). The
-#: default, and the only value the public build's config schema accepts.
+#: ``agent.provider`` value selecting the ACP family (kiro-cli and KAS).
+#: The default provider seam.
 PROVIDER_ACP = "acp"
+
+#: ``agent.provider`` value selecting the direct Codebrain-style native CLI seam.
+#: It does not construct an ACP runtime.
+PROVIDER_CODEBRAIN = "codebrain"
 
 
 def is_claude_code(provider: str | None) -> bool:

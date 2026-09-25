@@ -461,6 +461,27 @@ def _sits_under_any(path: str, roots: tuple) -> bool:
     return False
 
 
+def _unmasked_enforced_adapters_allowed() -> bool:
+    """Whether the operator explicitly accepted running an adapter unmasked.
+
+    Lazy config load, and failures answer False: this is a leaf that ``acp/client``
+    imports at import time, and a config that cannot be read must not be a reason
+    to DROP a security floor.
+    """
+    try:
+        from kiro_crew.config.loader import KiroCrewConfig
+
+        return bool(
+            getattr(
+                KiroCrewConfig.load().agent,
+                "sandbox_allow_unmasked_enforced_adapters",
+                False,
+            )
+        )
+    except Exception:
+        return False
+
+
 def enforce_sandbox_floor(backend: str, mode: str) -> None:
     """Refuse an enforced adapter whose credential mask would never be applied.
 
@@ -502,6 +523,19 @@ def enforce_sandbox_floor(backend: str, mode: str) -> None:
     # resolves to a non-``off`` tier, passed the guard, and still spawned the adapter
     # with its credential mask dropped.
     if credential_mask_applies(mode):
+        return
+    # Explicit operator unlock. Read here rather than at the call sites so every
+    # caller of the floor honours it identically, and logged at WARNING on every
+    # spawn (not once) because the exposure is per session: this adapter
+    # self-approves its own tool calls and the mask is the only boundary between
+    # its passive reads and the credential homes.
+    if _unmasked_enforced_adapters_allowed():
+        logging.getLogger(__name__).warning(
+            "%s is spawning WITHOUT its OS-level credential mask because "
+            "agent.sandbox_allow_unmasked_enforced_adapters is set: its self-approved "
+            "tool calls can read credential files unfenced.",
+            label_for(backend),
+        )
         return
     # Platform copy only: the verdict above already decided the session cannot
     # start. Recommending standard/strict is advice that cannot succeed on native

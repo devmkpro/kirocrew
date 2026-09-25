@@ -965,6 +965,12 @@ from kiro_crew.dashboard.handlers.computer_use import (  # noqa: E402, F401
     api_computer_use_invoke,
 )
 
+# ── Codebrain-style provider store (Settings > Codebrain) ──
+from kiro_crew.dashboard.handlers.codebrain_providers import (  # noqa: E402, F401
+    api_codebrain_providers,
+    api_codebrain_providers_save,
+)
+
 # ── Core (extracted to handlers/core.py) ──
 from kiro_crew.dashboard.handlers.core import (  # noqa: E402, F401
     _DIST_DIR,

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"
+     width="512" height="512" role="img" aria-label="Kiro Crew + Codebrain">
+  <title>Kiro Crew + Codebrain</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="rgb(139, 92, 246)"/>
+      <stop offset="1" stop-color="rgb(109, 40, 217)"/>
+    </linearGradient>
+    <clipPath id="squircle">
+      <rect x="6" y="6" width="500"
+            height="500" rx="118"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect x="6" y="6" width="500"
+          height="500" rx="118" fill="url(#bg)"/>
+    <!-- Kiro Crew ghost: dome plus tail, clipped by the corner -->
+    <g fill="rgb(255, 255, 255)">
+      <circle cx="80" cy="62" r="62"/>
+      <polygon points="74,58 152,92 86,120"/>
+    </g>
+    <g fill="rgb(11, 11, 15)">
+      <ellipse cx="62" cy="74" rx="8" ry="12" transform="rotate(-18.0 62 74)"/>
+      <ellipse cx="94" cy="82" rx="8" ry="12" transform="rotate(-18.0 94 82)"/>
+    </g>
+  </g>
+
+  <!-- Codebrain brain: shell, divider, one chevron per hemisphere -->
+  <rect x="96" y="130" width="320" height="250" rx="94"
+        fill="rgb(255, 255, 255)" stroke="rgb(76, 29, 149)" stroke-width="30"/>
+  <line x1="256" y1="130" x2="256" y2="380"
+        stroke="rgb(76, 29, 149)" stroke-width="30"/>
+  <polyline points="203,218 170,255 203,292" fill="none" stroke="rgb(79, 70, 229)"
+            stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="309,218 342,255 309,292" fill="none" stroke="rgb(79, 70, 229)"
+            stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

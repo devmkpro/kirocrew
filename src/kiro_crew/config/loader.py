@@ -2694,6 +2694,12 @@ def _build_agent_config(agent_data: dict) -> AgentConfig:
                 unsandboxed_exec_platform_default(),
             )
         ),
+        # Defaults FALSE with no platform exception, unlike the field above: a host
+        # that cannot sandbox still must not silently drop an enforced adapter's
+        # credential mask. Only an explicit declaration turns it off.
+        sandbox_allow_unmasked_enforced_adapters=_safe_bool(
+            agent_data.get("sandbox_allow_unmasked_enforced_adapters", False), False
+        ),
         apps_allow_third_party=_safe_bool(agent_data.get("apps_allow_third_party", False), False),
         apps_trusted=(
             [a for a in _trusted if isinstance(a, str) and a]
@@ -5622,6 +5628,36 @@ class KiroCrewConfig:
         the kiro-cli backend. The factory accepts an optional ``session_key`` to
         create a per-session subdirectory under ``workspace_root()``.
         """
+        from kiro_crew.agent_sdk.provider_identity import PROVIDER_CODEBRAIN
+
+        if self.agent.provider == PROVIDER_CODEBRAIN:
+            from kiro_crew.providers.codebrain import CodebrainProvider
+
+            direct_model = self.agent.model
+            if direct_model in ("", DEFAULT_MODEL):
+                direct_model = None
+
+            def _codebrain(
+                session_key: str | None = None,
+                agent: str | None = None,
+                channel_id: str | None = None,
+                model_override: str | None = None,
+                cwd: str | None = None,
+                extra_env: dict[str, str] | None = None,
+                **_kwargs: object,
+            ) -> CodebrainProvider:
+                del channel_id
+                work_dir = Path(cwd) if cwd else _session_work_dir(session_key)
+                return CodebrainProvider(
+                    work_dir=work_dir,
+                    model=model_override or direct_model,
+                    agent=agent,
+                    session_key=session_key,
+                    extra_env=extra_env,
+                )
+
+            return _codebrain
+
         from kiro_crew.providers.acp import (
             AcpProvider,  # circular: acp -> client -> session -> config.loader
         )

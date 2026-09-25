@@ -8255,7 +8255,7 @@ def _model_rejected_reason(model_name: str, provider: str | None = None) -> str 
             provider = KiroCrewConfig.load().agent.provider
         except Exception:  # pragma: no cover - config load is resilient
             provider = ""
-    if is_claude_code(provider):
+    if is_claude_code(provider) or provider == "codebrain":
         return None
     if model_registry.is_canonical_key(model_name):
         return (

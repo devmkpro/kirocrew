@@ -293,10 +293,11 @@ def _is_claude_backend(provider: Any) -> bool:
 
 
 def _provider_label(provider: Any) -> str:
-    """Backend identity key for *provider* — see ``providers.acp.provider_label``.
-
-    Deferred import for the same reason ``_is_claude_backend`` defers it.
-    """
+    """Backend identity key for *provider*, including direct CLI providers."""
+    direct_label = getattr(provider, "provider_label", "")
+    if isinstance(direct_label, str) and direct_label:
+        return direct_label
+    # Deferred import for the same reason ``_is_claude_backend`` defers it.
     from kiro_crew.providers.acp import provider_label  # circular: providers -> session
 
     return provider_label(provider)
