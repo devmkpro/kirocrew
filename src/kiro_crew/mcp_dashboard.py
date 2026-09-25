@@ -133,6 +133,12 @@ SESSION_CONTROL_TOOLS: tuple[str, ...] = (
     "session_adopt",
     "session_release",
     "session_read_message",
+    # The inbox pair rides the session-control surface because it shares that
+    # surface's authorization: a send authorizes the TARGET exactly as
+    # ``session_send`` does, and a read derives its recipient from the strict
+    # caller identity the same gate already establishes.
+    "agent_inbox_send",
+    "agent_inbox_read",
 )
 
 # The folder endpoints store ``name[:100]``. Mirroring the number here is what

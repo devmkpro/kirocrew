@@ -3395,6 +3395,25 @@ SESSION_READ_MESSAGE_SCHEMA = ToolSchema(
     ],
 )
 
+AGENT_INBOX_SEND_SCHEMA = ToolSchema(
+    tool_name="agent_inbox_send",
+    fields=[
+        FieldSpec("target", str, required=True, max_len=MAX_SHORT_STRING),
+        FieldSpec("message", str, required=True, max_len=MAX_LONG_STRING),
+    ],
+)
+
+AGENT_INBOX_READ_SCHEMA = ToolSchema(
+    tool_name="agent_inbox_read",
+    fields=[
+        # No ``target``, and its absence is the access control: the recipient is
+        # derived from the STRICT caller identity at the route, never from a
+        # request field. A reader that could name its own recipient could read
+        # another session's mail, so the parameter does not exist to be forged.
+        FieldSpec("limit", int, required=False, min_val=1, max_val=100, default=20),
+    ],
+)
+
 # ── Schema Registry ──
 
 MCP_CORE_SCHEMAS: dict[str, ToolSchema] = {
@@ -3638,6 +3657,8 @@ MCP_DASHBOARD_SCHEMAS: dict[str, ToolSchema] = {
     "session_adopt": SESSION_ADOPT_SCHEMA,
     "session_release": SESSION_RELEASE_SCHEMA,
     "session_read_message": SESSION_READ_MESSAGE_SCHEMA,
+    "agent_inbox_send": AGENT_INBOX_SEND_SCHEMA,
+    "agent_inbox_read": AGENT_INBOX_READ_SCHEMA,
     "chat_folder_tree": CHAT_FOLDER_TREE_SCHEMA,
     "chat_folder_create": CHAT_FOLDER_CREATE_SCHEMA,
     "chat_folder_move": CHAT_FOLDER_MOVE_SCHEMA,

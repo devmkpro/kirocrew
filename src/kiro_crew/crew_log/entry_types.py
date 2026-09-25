@@ -861,6 +861,41 @@ _SESSION_TYPES: tuple[EntryType, ...] = (
         note="No turn: a queued message belongs to no turn yet.",
     ),
     EntryType(
+        "message/inbox_queued",
+        "A durable agent-to-agent inbox message was committed.",
+        (
+            Field("inbox_id", JSON_STRING, required=True, note="The inbox row's own id."),
+            Field("sender_slot", JSON_STRING, required=True, note="Slot that left the message."),
+            Field("recipient_slot", JSON_STRING, required=True, note="Slot it is addressed to."),
+            Field("bytes", JSON_INT, required=True, note="Size of the committed body."),
+            Field(
+                "body_sha256",
+                JSON_STRING,
+                required=True,
+                note="Digest, so the row can be tied to a body without storing it twice.",
+            ),
+        ),
+        note=(
+            "No body: 'message/received' already records content a turn accepted, "
+            "redacted and chunked. Recording it here as well would put the same text "
+            "in the log twice, under a type that has no redaction path."
+        ),
+    ),
+    EntryType(
+        "message/inbox_read",
+        "A recipient atomically claimed an inbox message.",
+        (
+            Field("inbox_id", JSON_STRING, required=True, note="The claimed row's id."),
+            Field("sender_slot", JSON_STRING, required=True, note="Who had left it."),
+            Field("read_at", JSON_FLOAT, required=True, note="When the claim was stamped."),
+        ),
+        note=(
+            "The pair with 'message/inbox_queued' is what makes a lost recado "
+            "diagnosable: a queued entry with no read entry is mail that was "
+            "committed and never consumed."
+        ),
+    ),
+    EntryType(
         "request/configured",
         "The request configuration, recorded only when it changed.",
         (
