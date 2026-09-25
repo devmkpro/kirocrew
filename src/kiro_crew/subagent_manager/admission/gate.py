@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from .._component import ManagerComponent
@@ -48,6 +49,32 @@ class _GateMixin(ManagerComponent):
         CLAIM_RETAINED: str
 
         TASK_STORE_UNAVAILABLE_CODE: str
+
+    def _parent_project_root(self, parent_session_key: str) -> str:
+        """The directory the PARENT session is already working in, or ``""``.
+
+        Read off the parent's live provider rather than from a dashboard slot
+        record, for two reasons: this module is below the dashboard layer and must
+        not import it, and the provider's ``cwd`` is the directory the parent's
+        own tools actually run in -- which is the thing a child asking for the
+        same cwd is really asking for.
+
+        Never raises: a parent with no live provider (a cron, a headless caller, a
+        session whose provider has been disposed) simply contributes no root, and
+        the configured allow-list decides alone.
+        """
+        if not parent_session_key:
+            return ""
+        try:
+            provider = self._manager._sessions.get_provider(parent_session_key)
+            if provider is None:
+                return ""
+            cwd = getattr(provider, "cwd", "")
+            if not isinstance(cwd, str) or not cwd.strip():
+                return ""
+            return os.path.realpath(os.path.expanduser(cwd))
+        except Exception:
+            return ""
 
     def resolve_spawn_execution(
         self,
@@ -430,6 +457,20 @@ class _GateMixin(ManagerComponent):
                 # silently re-enable the feature for admins who set
                 # subagent_cwd_allowed_roots=[] to disable it.
                 allowed_roots = []
+            # The parent session's OWN project directory is not a new grant: the
+            # user chose that project for this session, `include_project` already
+            # ships its context to the child, and the tools the child runs there
+            # are the same ones the parent runs there. Refusing it forced every
+            # spawn in a project outside the four shipped work-tree roots to be
+            # retried without a cwd -- which silently moves the child to an
+            # unrelated directory and makes its file reads answer for the wrong
+            # tree. Added ONLY when the operator has not disabled the feature
+            # outright (empty list), so `subagent_cwd_allowed_roots=[]` keeps
+            # meaning "no cwd overrides at all".
+            if allowed_roots:
+                project_root = self._parent_project_root(parent_session_key)
+                if project_root and project_root not in allowed_roots:
+                    allowed_roots = [*allowed_roots, project_root]
             resolved_cwd, cwd_err = validate_cwd(cwd, allowed_roots)
             if cwd_err:
                 if _persistent_diagnostics:

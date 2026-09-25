@@ -49,9 +49,18 @@ class ResolvedProvider:
     model_corrected: bool = False
 
 
-# This is intentionally a transport-agnostic subset of Codebrain's registry.
-# API-backed templates become candidates only when the user stores a profile;
-# native CLI templates become candidates when their executable is present.
+# NATIVE CLI PROFILES ONLY.
+#
+# The API-backed templates that used to sit here (anthropic, gemini, mimo-claude,
+# codex-by-key) were candidates the resolver would happily select and the provider
+# could not then drive: this build implements two transports, codex's `item.*`
+# JSONL and Claude Code's `stream-json`, and nothing else. Offering a profile whose
+# transport does not exist turns a configuration mistake into a runtime failure
+# mid-turn, which is strictly worse than not offering it.
+#
+# A stored profile in providers.json is still honoured -- that is the seam for an
+# endpoint (OpenRouter, DeepSeek, a team gateway) routed at one of these CLIs by
+# environment. What is gone is the PRETENCE that a profile alone is enough.
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition(
         id="claude-oauth",
@@ -72,53 +81,6 @@ PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
         host="codex",
         models=("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"),
         is_virtual=True,
-    ),
-    ProviderDefinition(
-        id="gemini-cli",
-        label="Gemini CLI",
-        type="gemini-cli",
-        host="gemini",
-        models=("gemini-3.5-flash",),
-        is_virtual=True,
-    ),
-    ProviderDefinition(
-        id="anthropic",
-        label="Anthropic",
-        type="anthropic-compat",
-        host="claude",
-        models=(
-            "claude-haiku-4-5-20251001",
-            "claude-sonnet-4-6",
-            "claude-opus-4-8",
-        ),
-        base_url="https://api.anthropic.com",
-        token_env_var="ANTHROPIC_API_KEY",
-    ),
-    ProviderDefinition(
-        id="codex",
-        label="OpenAI Codex",
-        type="codex",
-        host="codex",
-        models=("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"),
-        token_env_var="OPENAI_API_KEY",
-    ),
-    ProviderDefinition(
-        id="gemini",
-        label="Google Gemini",
-        type="gemini-compat",
-        host="gemini",
-        models=("gemini-3.5-flash", "gemini-3.1-pro-preview"),
-        base_url="https://generativelanguage.googleapis.com/v1beta",
-        token_env_var="GEMINI_API_KEY",
-    ),
-    ProviderDefinition(
-        id="mimo-claude",
-        label="MIMO via Claude",
-        type="anthropic-compat",
-        host="claude",
-        models=("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-flash"),
-        base_url="https://token-plan-ams.xiaomimimo.com/anthropic",
-        token_env_var="ANTHROPIC_AUTH_TOKEN",
     ),
 )
 

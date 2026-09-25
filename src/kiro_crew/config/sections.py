@@ -1215,6 +1215,22 @@ class AgentConfig:
             "this floor.",
         ),
     )
+    subagent_keep_default: bool = field(
+        default=False,
+        metadata=_meta(
+            "Keep Sub-agent Conversations By Default",
+            "When true, a spawn that does not say otherwise is CONTINUABLE: its "
+            "session survives the task instead of being torn down, so "
+            "spawn_continue can send it more work and spawn_steer can talk to it "
+            "mid-run. This is the standing-worker model — a front-end worker or a "
+            "UI-tester that stays reachable across tasks rather than one "
+            "disposable run per request. An explicit keep=false on a spawn still "
+            "wins, so a deliberately throwaway run is unaffected. Off by default "
+            "because a retained conversation holds its session files (and, while "
+            "warm, its process) until spawn_release or idle expiry, so turning "
+            "this on trades disk and memory for availability.",
+        ),
+    )
     apps_allow_third_party: bool = field(
         default=False,
         metadata=_meta(

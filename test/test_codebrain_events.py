@@ -147,3 +147,60 @@ def test_an_unknown_item_kind_yields_nothing(tmp_path: Path) -> None:
     assert _provider(tmp_path)._events_from_json_event(
         {"type": "item.completed", "item": {"type": "some_future_kind"}}
     ) == []
+
+
+def test_thread_id_is_never_taken_from_an_item_id(tmp_path: Path) -> None:
+    """An item id must not be mistaken for the thread id.
+
+    Every ``item.*`` frame carries ``item_0``, so accepting it overwrote the real
+    thread id on the first tool call and the next turn resumed a session that does
+    not exist. Codex answers that with a fresh EMPTY thread instead of an error,
+    so the symptom was "the model forgot", not a visible failure.
+    """
+    provider = _provider(tmp_path)
+
+    provider._remember_native_session_id({"type": "thread.started", "thread_id": "th-42"})
+    assert provider._native_session_id == "th-42"
+
+    provider._remember_native_session_id(
+        {"type": "item.completed", "item": {"id": "item_0", "type": "agent_message"}}
+    )
+    assert provider._native_session_id == "th-42"
+
+
+def test_a_resumed_turn_keeps_history_and_tools(tmp_path: Path, monkeypatch) -> None:
+    """Both halves of a session must work at once.
+
+    ``resume`` rejects ``--approve-for-me`` and requires every option BEFORE the
+    positional session id, so the approval must come from the config key behind
+    that flag -- otherwise a resumed turn keeps its history and loses every tool.
+    """
+    import asyncio
+
+    from kiro_crew.providers.codebrain_resolver import ProviderResolver, ProviderStore
+
+    monkeypatch.setattr("kiro_crew.providers.codebrain.shutil.which", lambda _: "/fake/codex")
+    provider = CodebrainProvider(
+        work_dir=tmp_path,
+        agent="codex",
+        resolver=ProviderResolver(
+            ProviderStore(tmp_path / "providers.json"),
+            cli_lookup=lambda host: f"/fake/{host}" if host == "codex" else None,
+        ),
+    )
+    asyncio.run(provider.start())
+
+    first = provider._argv()
+    assert "resume" not in first
+    assert "--approve-for-me" in first
+
+    provider._native_session_id = "th-42"
+    resumed = provider._argv()
+
+    assert resumed[1:3] == ["exec", "resume"]
+    # Approval survives the loss of the flag.
+    assert "--approve-for-me" not in resumed
+    assert 'approvals_reviewer="auto_review"' in resumed
+    # The id is positional, last before the stdin marker, and every option
+    # precedes it -- a flag after the id is a usage error.
+    assert resumed[-2:] == ["th-42", "-"]

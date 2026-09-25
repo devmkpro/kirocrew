@@ -45,6 +45,15 @@ _MCP_STARTUP_TIMEOUT_SECS = 60
 #: package, and this provider is constructed from ``config.loader``.
 _STUB_SESSION_TOKEN_ENV = "KIROCREW_STUB_SESSION_TOKEN"
 
+HOST_CODEX = "codex"
+HOST_CLAUDE = "claude"
+
+#: The native CLIs this provider drives. Each needs its own argv shape AND its own
+#: event vocabulary -- codex speaks `item.*` JSONL, Claude Code speaks
+#: `system`/`assistant`/`user`/`result` stream-json -- so a host is supported only
+#: once both halves are implemented, never because its profile exists.
+_SUPPORTED_HOSTS = frozenset({HOST_CODEX, HOST_CLAUDE})
+
 
 class CodebrainProvider(LLMProvider):
     """A direct native-CLI LLM provider.
@@ -130,14 +139,15 @@ class CodebrainProvider(LLMProvider):
         )
         if resolved.error or resolved.provider is None:
             raise RuntimeError(resolved.error or "Direct provider resolution failed")
-        if resolved.provider.host != "codex" or resolved.provider.type != "codex":
+        if resolved.provider.host not in _SUPPORTED_HOSTS:
             raise RuntimeError(
-                f"Direct CLI profile {resolved.provider.id!r} is registered but this build "
-                "currently supports only the Codex JSONL transport."
+                f"Direct CLI profile {resolved.provider.id!r} names host "
+                f"{resolved.provider.host!r}, and this build implements only the native "
+                f"{', '.join(sorted(_SUPPORTED_HOSTS))} CLI transports."
             )
-        binary = shutil.which("codex")
+        binary = shutil.which(resolved.provider.host)
         if not binary:
-            raise RuntimeError("Codex CLI is not available on PATH")
+            raise RuntimeError(f"{resolved.provider.host} CLI is not available on PATH")
         self._resolved = resolved
         self._binary = binary
         self._ensure_work_dir()
@@ -162,17 +172,161 @@ class CodebrainProvider(LLMProvider):
         except OSError:
             pass
 
+    @property
+    def _host(self) -> str:
+        """Which native CLI this provider drives.
+
+        Resolved from the selected profile once :meth:`start` has run, and from the
+        REQUESTED agent before that. Deliberately not an assertion: the two event
+        translators are pure functions of one frame and are worth testing without
+        booting a resolver -- that is how the ``tool_output`` regression was caught
+        -- and an assert here would make the translator untestable in isolation.
+        Every production caller goes through ``_stream_direct``, which starts first.
+        """
+        if self._resolved is not None and self._resolved.provider is not None:
+            return self._resolved.provider.host
+        requested = (self._requested_agent or "").strip().lower()
+        return HOST_CLAUDE if requested == HOST_CLAUDE else HOST_CODEX
+
+    def _extra_allowed_dirs(self) -> list[str]:
+        """Directories the child's own tools must be able to reach, beyond its cwd.
+
+        Both CLIs sandbox their file and shell tools to the working directory, and
+        a KiroCrew sub-agent's cwd is typically a per-session directory under the
+        workspace root -- NOT the project. So a sub-agent asked to read the project
+        fails inside the CHILD's sandbox (Claude's Bash reports
+        ``bwrap: Operation not permitted``), which reads as "the files are missing"
+        rather than "the tool was fenced out of them".
+
+        Granted by default, because the two trees here are the ones the work is
+        about: the KiroCrew WORKSPACE (the agent's own shared data area, where
+        sibling session directories and staged briefs live) and the ACTIVE PROJECT
+        the session is scoped to. Neither is a new trust boundary -- the parent
+        session already reads and writes both.
+
+        The cwd itself is omitted: it is the primary workspace both CLIs allow
+        already, so repeating it would only pad the argv.
+        """
+        candidates: list[str] = []
+        try:
+            from kiro_crew.config.loader import workspace_root
+
+            candidates.append(str(workspace_root()))
+        except Exception:
+            pass
+        project = os.environ.get("KIROCREW_PROJECT_DIR", "").strip()
+        if project:
+            candidates.append(project)
+        resolved_cwd = os.path.realpath(self._work_dir)
+        out: list[str] = []
+        for candidate in candidates:
+            try:
+                path = os.path.realpath(os.path.expanduser(candidate))
+            except (OSError, ValueError):
+                continue
+            if not path or path == resolved_cwd or path in out:
+                continue
+            if os.path.isdir(path):
+                out.append(path)
+        return out
+
     def _argv(self) -> list[str]:
         assert self._resolved is not None
-        argv = [self._binary, "exec", "--json"]
+        if self._host == HOST_CLAUDE:
+            return self._claude_argv()
+        return self._codex_argv()
+
+    def _claude_argv(self) -> list[str]:
+        """Headless Claude Code, measured against CLI 2.1.282.
+
+        ``-p`` is headless mode and reads the prompt from stdin when no positional
+        prompt is given. ``stream-json`` REQUIRES ``--verbose`` -- without it the
+        CLI refuses the combination rather than degrading, so the flag is not
+        optional decoration.
+
+        ``--permission-mode dontAsk`` is the analogue of the codex path's
+        ``--approve-for-me``: a KiroCrew session has no Claude TUI, so a mode that
+        prompts leaves every tool call waiting on a surface nobody can answer.
+        ``bypassPermissions`` is deliberately NOT used -- it disables the checks
+        rather than answering them.
+
+        ``--resume <id>`` continues the session recorded on turn one, which is what
+        lets the model answer "did it work?" about its own earlier turn.
+        """
+        assert self._resolved is not None
+        argv = [
+            self._binary,
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-mode",
+            "dontAsk",
+        ]
+        if self._native_session_id:
+            argv.extend(["--resume", self._native_session_id])
+        for extra in self._extra_allowed_dirs():
+            # Repeated rather than one variadic list: `--add-dir` is variadic here,
+            # so a single flag followed by several paths would swallow the NEXT
+            # flag's value as another directory.
+            argv.extend(["--add-dir", extra])
+        servers = self._managed_mcp_servers()
+        mcp = self._claude_mcp_config(servers)
+        if mcp:
+            argv.extend(["--mcp-config", mcp])
+            # `dontAsk` does NOT auto-approve MCP tools -- measured: the call comes
+            # back "Permission to use mcp__kirocrew-core__resource_status ...
+            # denied". The permission has to be granted per tool namespace, and the
+            # SERVER PREFIX is enough (`mcp__<server>`), so exactly the control
+            # plane this provider mounted is allowed and nothing else is. The
+            # alternative, `--dangerously-skip-permissions`, would allow every tool
+            # Claude has, which is a far wider grant for the same goal.
+            argv.append("--allowedTools")
+            argv.extend(f"mcp__{name}" for name in servers)
+        if self._resolved.model:
+            argv.extend(["--model", self._resolved.model])
+        return argv
+
+    def _claude_mcp_config(self, servers: Mapping[str, Any] | None = None) -> str:
+        """KiroCrew's control plane as a ``--mcp-config`` JSON string.
+
+        Claude takes the whole server map in one argument, where codex takes a
+        ``-c`` override per key -- same servers, same env (including the signed
+        session token and the gateway port), different transport for the config
+        itself. Returns ``""`` when nothing could be resolved, so the flag is
+        omitted rather than passed empty.
+        """
+        servers = self._managed_mcp_servers() if servers is None else servers
+        if not servers:
+            return ""
+        try:
+            return json.dumps({"mcpServers": dict(servers)})
+        except (TypeError, ValueError):
+            return ""
+
+    def _codex_argv(self) -> list[str]:
+        assert self._resolved is not None
+        resuming = bool(self._native_session_id)
+        argv = [self._binary, "exec"]
+        # CONTINUITY. Each turn is its own `codex exec` process, so without
+        # resuming the thread the model starts every turn with no history: it
+        # cannot answer "did it work?", and the host's own end-of-wave synthesis
+        # prompt gets "no sub-agents were spawned" from a parent that spawned one
+        # a minute earlier. `thread.started` gives us the id on turn one
+        # (`_remember_native_session_id`); every later turn resumes it.
+        if resuming:
+            argv.append("resume")
+        argv.append("--json")
         # Codex refuses a cwd that is not a git repo ("Not inside a trusted
         # directory") because its own trust model is per repository. A KiroCrew
         # session's work dir is frequently NOT a repo -- a per-session scratch
         # directory under the workspace root is the normal case -- so that guard
         # fails every such turn before the model is ever reached.
         argv.append("--skip-git-repo-check")
+        for extra in self._extra_allowed_dirs():
+            argv.extend(["--add-dir", extra])
         # Approval routing, and the ONLY combination in which a mounted MCP tool
-        # actually runs here. Measured, not assumed:
+        # actually runs. Measured against the CLI, not assumed:
         #
         #   * plain `--sandbox workspace-write` leaves codex's approval reviewer
         #     set to the human, and a KiroCrew session has no codex TUI to answer
@@ -181,45 +335,52 @@ class CodebrainProvider(LLMProvider):
         #   * forcing `-c approval_policy="never"` does NOT grant the call; it
         #     REFUSES it, with the same message. "never ask" is not "always
         #     allow".
-        #   * `--approve-for-me` routes approvals through automatic review and is
-        #     mutually exclusive with `--sandbox` (the parser rejects the pair
-        #     outright), so the explicit sandbox flag is dropped here -- not
-        #     weakened: this flag reviews inside the SAME workspace-write sandbox,
-        #     per codex's own help text.
+        #   * `--approve-for-me` routes approvals through automatic review, and is
+        #     mutually exclusive with `--sandbox` (the parser rejects the pair), so
+        #     no explicit sandbox flag is passed -- not a weakening: that flag
+        #     reviews inside the SAME workspace-write sandbox, per codex's help.
         #
-        # Crew's authorization is unaffected either way: these tools reach the
-        # gateway over its own IPC and are gated there.
-        argv.append("--approve-for-me")
+        # The `resume` subcommand does NOT accept `--approve-for-me`, so the
+        # config key behind it is set directly there. Without this a resumed turn
+        # keeps its history but loses every tool -- the two halves of a working
+        # session would be mutually exclusive.
+        if resuming:
+            argv.extend(["-c", 'approvals_reviewer="auto_review"'])
+        else:
+            argv.append("--approve-for-me")
         argv.extend(self._mcp_config_overrides())
         if self._resolved.model:
             argv.extend(["--model", self._resolved.model])
+        # `resume` takes the session id POSITIONALLY and ahead of the prompt, and
+        # every option must precede it -- flags after the id are a usage error.
+        if resuming:
+            argv.append(self._native_session_id)
         # '-' asks Codex to read the prompt from stdin, preserving exact
         # whitespace and avoiding shell quoting entirely.
         argv.append("-")
         return argv
 
-    def _mcp_config_overrides(self) -> list[str]:
-        """``-c`` overrides mounting KiroCrew's own control plane in the child CLI.
+    def _managed_mcp_servers(self) -> dict[str, dict[str, Any]]:
+        """KiroCrew's own control-plane servers, with the env a child needs.
 
-        Without this the child gets NO KiroCrew tools at all -- no ``spawn_run``,
-        no memory, no cron -- and a model asked to delegate answers as though it
-        had, because nothing tells it the tool is absent. That is the failure this
-        exists to prevent, and it is worse than a visible error: the turn LOOKS
-        successful and no work happened.
+        Shared by BOTH transports: codex takes one ``-c`` override per key, Claude
+        takes the whole map as a ``--mcp-config`` JSON string. Building the map
+        once is what keeps the two from drifting -- a child that gets the session
+        token on one CLI and not the other fails in a way that looks like a
+        provider bug rather than a missing variable.
 
-        ``approval_policy`` is deliberately NOT overridden here. Setting it to
-        ``"never"`` reads like "do not prompt" but means "refuse anything that
-        would prompt", and it makes every MCP call fail with
-        "requires approval, but approval policy is never". The approval routing
-        that DOES work is the ``--approve-for-me`` flag in :meth:`_argv`.
+        Without these servers the child has NO KiroCrew tools at all -- no
+        ``spawn_run``, no memory, no cron -- and a model asked to delegate answers
+        as though it had, because nothing tells it the tool is absent. That is the
+        failure this exists to prevent, and it is worse than a visible error: the
+        turn LOOKS successful and no work happened.
 
-        The server names are TOML bare keys, so ``kirocrew-core`` is mounted as
-        ``kirocrew_core`` -- a hyphen would need quoting inside a ``-c`` value and
-        codex's key parser does not accept it.
+        Keys are the CANONICAL server names with hyphens; the codex path rewrites
+        them to TOML bare keys itself.
         """
         from kiro_crew.agent import managed_mcp_spec_entry
 
-        overrides: list[str] = []
+        servers: dict[str, dict[str, Any]] = {}
         for name in ("kirocrew-core", "kirocrew-cron"):
             try:
                 entry = managed_mcp_spec_entry(name)
@@ -230,7 +391,6 @@ class CodebrainProvider(LLMProvider):
             command = entry.get("command")
             if not isinstance(command, str) or not command:
                 continue
-            key = name.replace("-", "_")
             env = {
                 env_key: env_value
                 for env_key, env_value in (entry.get("env") or {}).items()
@@ -250,16 +410,13 @@ class CodebrainProvider(LLMProvider):
                 token = self._session_token()
                 if token:
                     env[_STUB_SESSION_TOKEN_ENV] = token
-            # The gateway PORT, and it is not optional. A `-c mcp_servers.*.env`
-            # table REPLACES the child's environment rather than extending it, so
-            # a server given only KIROCREW_HOME resolves the port from its own
+            # The gateway PORT, and it is not optional. Both transports hand the
+            # server an EXPLICIT env map rather than extending the child's, so a
+            # server given only KIROCREW_HOME resolves the port from its own
             # default (5476) and presents THIS instance's credential to whichever
-            # gateway owns that port. The failure is not a missing-port error --
-            # it is "this client authenticated against the wrong Kiro Crew
-            # instance", which reads like a credential bug and is really a lost
-            # env var. Read from the live process because that is where the
-            # launcher put it; the config module's constant is the same value
-            # resolved at import.
+            # gateway owns that port. The failure is not a missing-port error -- it
+            # is "this client authenticated against the wrong Kiro Crew instance",
+            # which reads like a credential bug and is really a lost env var.
             port = os.environ.get("KIROCREW_PORT", "")
             if not port:
                 try:
@@ -270,13 +427,36 @@ class CodebrainProvider(LLMProvider):
                     port = ""
             if port:
                 env["KIROCREW_PORT"] = port
-            inline_env = ", ".join(f"{k}={json.dumps(v)}" for k, v in env.items())
+            servers[name] = {
+                "command": command,
+                "args": list(entry.get("args") or []),
+                "env": env,
+            }
+        return servers
+
+    def _mcp_config_overrides(self) -> list[str]:
+        """``-c`` overrides mounting KiroCrew's control plane in the codex child.
+
+        ``approval_policy`` is deliberately NOT overridden here. Setting it to
+        ``"never"`` reads like "do not prompt" but means "refuse anything that
+        would prompt", and it makes every MCP call fail with
+        "requires approval, but approval policy is never". The approval routing
+        that DOES work is ``--approve-for-me`` / ``approvals_reviewer``.
+
+        The server names are TOML bare keys, so ``kirocrew-core`` is mounted as
+        ``kirocrew_core`` -- a hyphen would need quoting inside a ``-c`` value and
+        codex's key parser does not accept it.
+        """
+        overrides: list[str] = []
+        for name, server in self._managed_mcp_servers().items():
+            key = name.replace("-", "_")
+            inline_env = ", ".join(f"{k}={json.dumps(v)}" for k, v in server["env"].items())
             overrides.extend(
                 [
                     "-c",
-                    f"mcp_servers.{key}.command={json.dumps(command)}",
+                    f"mcp_servers.{key}.command={json.dumps(server['command'])}",
                     "-c",
-                    f"mcp_servers.{key}.args={json.dumps(list(entry.get('args') or []))}",
+                    f"mcp_servers.{key}.args={json.dumps(server['args'])}",
                     "-c",
                     f"mcp_servers.{key}.env={{{inline_env}}}",
                     # The Python control plane imports a large dependency tree at
@@ -351,23 +531,34 @@ class CodebrainProvider(LLMProvider):
         return environment
 
     def _remember_native_session_id(self, payload: Mapping[str, Any]) -> None:
+        """Record the codex THREAD id, which is what ``exec resume`` addresses.
+
+        Deliberately narrow. An earlier version also accepted ``item.id``, and
+        that is the bug this docstring exists to prevent: every ``item.*`` frame
+        carries one (``item_0``), so the first tool call overwrote the thread id
+        with an item id, and the next turn resumed a session that does not exist.
+        Codex answers that with a fresh, EMPTY thread rather than an error -- so
+        the failure looked like a model that simply forgot, not like a bad id.
+
+        Only fields that genuinely name a thread are read, and the nested lookup
+        is limited to a ``thread`` object for the same reason.
+        """
         candidates: list[object] = [
             payload.get("thread_id"),
             payload.get("threadId"),
             payload.get("session_id"),
             payload.get("sessionId"),
         ]
-        for nested_key in ("thread", "item"):
-            nested = payload.get(nested_key)
-            if isinstance(nested, Mapping):
-                candidates.extend(
-                    (
-                        nested.get("id"),
-                        nested.get("thread_id"),
-                        nested.get("threadId"),
-                        nested.get("session_id"),
-                    )
+        nested = payload.get("thread")
+        if isinstance(nested, Mapping):
+            candidates.extend(
+                (
+                    nested.get("id"),
+                    nested.get("thread_id"),
+                    nested.get("threadId"),
+                    nested.get("session_id"),
                 )
+            )
         for candidate in candidates:
             if isinstance(candidate, str) and candidate.strip():
                 self._native_session_id = candidate.strip()
@@ -402,6 +593,123 @@ class CodebrainProvider(LLMProvider):
         return ""
 
     def _events_from_json_event(self, payload: Mapping[str, Any]) -> list[LLMEvent]:
+        if self._host == HOST_CLAUDE:
+            return self._claude_events(payload)
+        return self._codex_events(payload)
+
+    def _claude_events(self, payload: Mapping[str, Any]) -> list[LLMEvent]:
+        """Translate one Claude Code ``stream-json`` frame, shapes measured on 2.1.282.
+
+        The vocabulary is nothing like codex's. Frames are
+        ``{"type": "system", "subtype": "init", "session_id": ...}`` once,
+        then ``assistant`` / ``user`` frames whose ``message.content`` is a BLOCK
+        LIST, then a terminal ``result``. Tool activity lives inside those blocks:
+        a ``tool_use`` block is the call, and its result comes back as a
+        ``tool_result`` block on a ``user`` frame keyed by ``tool_use_id`` -- so
+        the pair is reconstructed across two frames rather than read off one.
+
+        An ``error`` on an assistant frame is surfaced as text rather than
+        swallowed: the not-logged-in case arrives exactly that way
+        ("Not logged in - Please run /login"), and dropping it would show an empty
+        turn instead of the one sentence that explains it.
+        """
+        kind = payload.get("type")
+        if kind == "system":
+            # session_id is picked up by the shared remember step; nothing to show.
+            return []
+        if kind == "result":
+            # Terminal frame. `_stream_direct` yields the completion itself, so
+            # only a genuine error body is worth surfacing here.
+            if payload.get("is_error") is True:
+                text = payload.get("result")
+                if isinstance(text, str) and text.strip():
+                    return [LLMEvent(kind=EVENT_TEXT_CHUNK, text=text)]
+            return []
+
+        message = payload.get("message")
+        blocks = message.get("content") if isinstance(message, Mapping) else None
+        if isinstance(blocks, str):
+            return [LLMEvent(kind=EVENT_TEXT_CHUNK, text=blocks)] if blocks else []
+        if not isinstance(blocks, list):
+            return []
+
+        events: list[LLMEvent] = []
+        for block in blocks:
+            if not isinstance(block, Mapping):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                text = block.get("text")
+                if isinstance(text, str) and text:
+                    events.append(LLMEvent(kind=EVENT_TEXT_CHUNK, text=text))
+            elif block_type == "thinking":
+                thought = block.get("thinking") or block.get("text")
+                if isinstance(thought, str) and thought:
+                    events.append(LLMEvent(kind=EVENT_THINKING_CHUNK, text=thought))
+            elif block_type == "tool_use":
+                name = block.get("name")
+                name = name if isinstance(name, str) and name else "tool"
+                # An MCP tool arrives as `mcp__<server>__<tool>`; splitting it is
+                # what lets the host attribute the call to its server instead of
+                # showing one opaque name.
+                server = ""
+                tool_name = name
+                if name.startswith("mcp__"):
+                    parts = name.split("__", 2)
+                    if len(parts) == 3:
+                        server, tool_name = parts[1], parts[2]
+                title = f"@{server}/{tool_name}" if server else tool_name
+                events.append(
+                    LLMEvent(
+                        kind=EVENT_TOOL_CALL,
+                        tool_call_id=str(block.get("id") or ""),
+                        title=title,
+                        wire_title=title,
+                        tool_name=tool_name,
+                        mcp_server_name=server,
+                        tool_kind="mcp" if server else "execute",
+                        tool_input=self._claude_block_text(block.get("input")),
+                    )
+                )
+            elif block_type == "tool_result":
+                body = self._claude_block_text(block.get("content"))
+                failed = block.get("is_error") is True
+                events.append(
+                    LLMEvent(
+                        kind=EVENT_TOOL_RESULT,
+                        tool_call_id=str(block.get("tool_use_id") or ""),
+                        tool_output=f"[failed] {body}".strip() if failed else body,
+                        tool_status="failed" if failed else "completed",
+                        tool_final=True,
+                    )
+                )
+        if not events:
+            error = payload.get("error")
+            if isinstance(error, str) and error.strip():
+                events.append(LLMEvent(kind=EVENT_TEXT_CHUNK, text=error))
+        return events
+
+    @staticmethod
+    def _claude_block_text(value: object) -> str:
+        """A block's payload as display text; joins the nested content-block form."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            parts = [
+                part.get("text", "")
+                for part in value
+                if isinstance(part, Mapping) and isinstance(part.get("text"), str)
+            ]
+            if any(parts):
+                return "".join(parts)
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value)
+            except (TypeError, ValueError):
+                return str(value)
+        return ""
+
+    def _codex_events(self, payload: Mapping[str, Any]) -> list[LLMEvent]:
         """Translate one Codex JSONL frame into the host's event vocabulary.
 
         Text alone is not enough. A turn that delegates work, runs a command, or

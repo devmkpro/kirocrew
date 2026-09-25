@@ -2700,6 +2700,7 @@ def _build_agent_config(agent_data: dict) -> AgentConfig:
         sandbox_allow_unmasked_enforced_adapters=_safe_bool(
             agent_data.get("sandbox_allow_unmasked_enforced_adapters", False), False
         ),
+        subagent_keep_default=_safe_bool(agent_data.get("subagent_keep_default", False), False),
         apps_allow_third_party=_safe_bool(agent_data.get("apps_allow_third_party", False), False),
         apps_trusted=(
             [a for a in _trusted if isinstance(a, str) and a]

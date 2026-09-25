@@ -590,9 +590,24 @@ async def api_spawn(request: web.Request) -> web.Response:
     # keep=True marks the run's session as a continuable conversation
     # (spawn_continue can dispatch follow-up turns into it). Transport-layer
     # param like silent/approval_mode.
+    #
+    # An ABSENT `keep` falls back to `agent.subagent_keep_default` rather than to
+    # False, which is what turns a one-shot worker into a standing one: a team
+    # model ("a front-end worker, a UI-tester worker, always reachable") needs the
+    # conversation to survive its first task so `spawn_continue` can send the
+    # next one and `spawn_steer` can talk to it mid-run. An EXPLICIT false still
+    # wins, so a caller that deliberately wants a disposable run keeps it.
+    keep_declared = "keep" in body
     keep = body.get("keep", False)
     if not isinstance(keep, bool):
         keep = str(keep).lower() in ("true", "1", "yes")
+    if not keep_declared:
+        try:
+            keep = bool(KiroCrewConfig.load().agent.subagent_keep_default)
+        except Exception:
+            # Fail towards the historical default: a config that cannot be read
+            # must not silently start retaining every run's session files.
+            keep = False
     agent = cleaned.get("agent") or ""
     from kiro_crew.dashboard.handlers._shared import member_request_scope
     from kiro_crew.execution_context import (
