@@ -276,13 +276,22 @@ class CodebrainProvider(LLMProvider):
             argv.extend(["--mcp-config", mcp])
             # `dontAsk` does NOT auto-approve MCP tools -- measured: the call comes
             # back "Permission to use mcp__kirocrew-core__resource_status ...
-            # denied". The permission has to be granted per tool namespace, and the
-            # SERVER PREFIX is enough (`mcp__<server>`), so exactly the control
-            # plane this provider mounted is allowed and nothing else is. The
-            # alternative, `--dangerously-skip-permissions`, would allow every tool
-            # Claude has, which is a far wider grant for the same goal.
-            argv.append("--allowedTools")
-            argv.extend(f"mcp__{name}" for name in servers)
+            # denied". The grant is therefore explicit, but it must be ADDITIVE:
+            # `--allowedTools` is an ALLOW-LIST, so naming only the MCP servers
+            # there silently revoked Claude's own Bash/Read/Edit and the agent then
+            # asked for permission to run `ls`. `--settings permissions.allow`
+            # ADDS grants and leaves the built-in tools alone.
+            #
+            # Scoped to the server prefixes this provider itself mounted, so
+            # nothing beyond Crew's own control plane is granted. Deliberately not
+            # `--dangerously-skip-permissions`, which would allow every tool Claude
+            # has for the sake of two.
+            argv.extend(
+                [
+                    "--settings",
+                    json.dumps({"permissions": {"allow": [f"mcp__{name}" for name in servers]}}),
+                ]
+            )
         if self._resolved.model:
             argv.extend(["--model", self._resolved.model])
         return argv
