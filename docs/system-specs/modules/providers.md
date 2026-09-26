@@ -43,13 +43,21 @@ isolation admission. See [the memory contract](memory-skills-hooks.md).
          │   providers/base   │
          └─────────┬─────────┘
                    │
-            ┌──────┴──────┐
-            │ AcpProvider │
-            │ acp.py      │
-            └──────┬──────┘
-                   │  backend id from agent_sdk/backends.py
-                   └─ harness selected from the live backend registry
+         ┌─────────┴─────────┐
+         │                   │
+┌────────┴────────┐ ┌────────┴──────────┐
+│   AcpProvider   │ │ CodebrainProvider │
+│   acp.py        │ │ codebrain.py      │
+└────────┬────────┘ └────────┬──────────┘
+         │                   │
+         │ backend id from   │ a native CLI's own JSON stream
+         │ agent_sdk/        │ (codex `exec --json`, Claude Code
+         │ backends.py       │  stream-json). No ACP, no backend id.
+         └─ harness from the
+            live backend registry
 ```
+
+`agent.provider` selects between the two; it defaults to `acp`.
 
 `agent_sdk/backends.py` is the selection authority: it defines the ids, the membership
 floor (`ACP_BACKENDS_KNOWN`), the selectable baseline, and every capability set a
@@ -63,9 +71,31 @@ config isolation) is [acp-client.md](acp-client.md); this file owns the
 *interface*.
 
 **Removed, and not to be re-added:** the Bedrock provider, the standalone
-provider, their config fields, and the multi-provider dispatch factory. A second
-`agent.provider` value would route around every harness-parity invariant, which
-is why the enum stays closed.
+provider and their config fields. Both spoke to a hosted model API on the
+operator's key; that is the shape this project does not carry.
+
+**`codebrain` is a second `agent.provider`, and it is deliberate.** This fork
+opened the enum — upstream keeps it closed at `acp`. The reason the enum was
+closed still holds and is the thing to understand before touching this path: a
+provider that does not go through `AcpProvider` routes around the harness-parity
+invariants, because those invariants are written about ACP backends and there is
+no backend id here to attach them to. `codebrain` therefore gets **none** of
+what [harness-parity.md](harness-parity.md) guarantees: no capability set, no
+backend registry entry, no `agent.acp_backend` selection, no
+[agent-host-contract.md](agent-host-contract.md) obligations. Do not read those
+documents as covering it, and do not "fix" this path by giving it a backend id —
+that would make it claim a contract it does not meet.
+
+What it buys in exchange is the one thing ACP cannot give: it drives a CLI the
+operator already installed and is already paying for, under that CLI's own plan
+and login, with no API key and no hosted endpoint. `codex exec --json` and
+Claude Code's stream-json are not ACP and will not become ACP, so adapting them
+behind `AcpProvider` would mean writing an ACP shim over each — which is the work
+this path exists to avoid.
+
+What still applies, in full, and is not negotiable: Kiro Crew's own PreToolUse
+gate, `POLICY ∩ PROFILE` governance, the OS sandbox, and the credential masks.
+The child is a foreign CLI process, so it is governed as one.
 
 The Claude Code harness has its own page: [claude-code-provider.md](claude-code-provider.md).
 
@@ -441,6 +471,42 @@ in [agent-host-contract.md](agent-host-contract.md).
 
 - **Resume guard:** `session/load` (resume) is only attempted when Tool Search is disabled and the prior session transcript exists on disk (`~/.kiro/sessions/cli/<sid>.json`). A stale persisted sid with no transcript falls back to `session/new`, preventing a fresh conversation from replaying old turns (which inflated base context).
 - **Working dir:** `AcpProvider.cwd` overrides the `LLMProvider` ABC default so `session_map` persists the real workspace path. AcpProvider's work_dir lives on the inner client (`_client._work_dir`), so a consumer reading `_work_dir` off the provider gets `""` for every ACP session; `provider.cwd` is the member to read.
+
+### CodebrainProvider (`providers/codebrain.py`)
+
+Selected by `agent.provider = "codebrain"`. Drives an installed native CLI as a
+child process and translates that CLI's own JSON stream into `LLMEvent`s. It does
+not import `AcpProvider` or `AcpRuntime`, and nothing in this section is reachable
+from an ACP backend id.
+
+**Supported hosts.** `_SUPPORTED_HOSTS` is `{codex, claude}`. A host counts as
+supported only once **both** halves exist — its argv shape and its event
+vocabulary — never because a resolver profile names it. The two vocabularies are
+unrelated: codex speaks `item.*` JSONL from `codex exec --json`, Claude Code
+speaks `system`/`assistant`/`user`/`result` stream-json. `_codex_events` and
+`_claude_events` own one each; a catalog entry with neither fails explicitly
+rather than degrading.
+
+**Event mapping.** The CLI's stream becomes the ordinary event vocabulary —
+`EVENT_TEXT_CHUNK`, `EVENT_THINKING_CHUNK`, `EVENT_TOOL_CALL`,
+`EVENT_TOOL_RESULT`, `EVENT_COMPLETE` — so consumers above `LLMProvider` cannot
+tell which provider served them. The adapter does **not** fabricate ACP
+permission events: the CLI's tools run inside the CLI's own process, under that
+CLI's own approval flow, so a permission prompt Kiro Crew never saw is not
+invented after the fact.
+
+**MCP.** `_managed_mcp_servers` mounts Crew's own servers into the child's MCP
+config. `_MCP_STARTUP_TIMEOUT_SECS = 60` overrides codex's short default: Crew's
+control plane is a Python process importing a large dependency tree, and on a
+cold or loaded host it outlasts that default — the server is then dropped with
+its tools **silently absent rather than reported missing**, which is why the
+timeout is generous rather than tuned.
+
+**Session identity** is the CLI's own (`_remember_native_session_id`), not an ACP
+session id.
+
+**Model.** `agent.model` at its default resolves to `None` and the CLI picks —
+the operator's plan decides, and no model id is hardcoded here.
 
 ### Config (`config/loader.py`)
 

@@ -192,3 +192,9 @@ src/kiro_crew/apps/builtins/aws_control/crew/runtime/vendor/*.whl
 # Cross-process lock for workspace Kiro CLI overlay writers.
 /.kiro/settings/.kirocrew-cli-settings.lock
 /.kiro/*
+
+# Local AI-tooling scratch dirs (Codebrain panes, Claude Code, Gemini CLI).
+# Runtime artifacts of the editor, never part of the package.
+/.codebrain/
+/.claude/
+/.gemini/

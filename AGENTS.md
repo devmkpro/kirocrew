@@ -191,8 +191,18 @@ positive: `is_kiro_backend`, `== ACP_BACKEND_KIRO`, or membership in a named
 `ACP_BACKENDS_*` set.
 
 An added harness ADAPTS to the seams the Kiro path already runs through; it never
-moves, widens or generalizes them, and it is selected at `agent.acp_backend` —
-`agent.provider` stays `enum=["acp"]`. Invariant ids (cite them bare, `H7`),
+moves, widens or generalizes them, and it is selected at `agent.acp_backend`.
+
+**Fork divergence:** `agent.provider` is no longer closed at `acp`. This fork adds
+`codebrain`, a direct native-CLI provider that bypasses `AcpProvider` to drive an
+installed codex or Claude Code CLI on the operator's own plan. It is NOT a harness
+and gets none of the guarantees below — no backend id, no capability set, no
+`agent-host-contract` obligations. Do not give it one to make it fit. Governance,
+the PreToolUse gate and the sandbox still apply to it in full. See
+[providers](docs/system-specs/modules/providers.md). Everything in this section
+governs ACP backends, which remain closed to the rules stated here.
+
+Invariant ids (cite them bare, `H7`),
 capability sets and the CI half:
 [harness-parity](docs/system-specs/modules/harness-parity.md). Run the added-line
 gate locally with

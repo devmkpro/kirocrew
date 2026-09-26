@@ -5625,9 +5625,16 @@ class KiroCrewConfig:
     def create_provider_factory(self) -> Callable:
         """Return a factory that creates LLMProvider instances from config.
 
-        KiroCrew is KiroACP-only: the sole provider is the ACP adapter driving
-        the kiro-cli backend. The factory accepts an optional ``session_key`` to
-        create a per-session subdirectory under ``workspace_root()``.
+        Two providers exist. ``acp`` is the default and the one every harness
+        invariant is written against: the ACP adapter driving the kiro-cli
+        backend, with the harness chosen at ``agent.acp_backend``. ``codebrain``
+        is the fork's direct native-CLI path -- it drives an installed codex or
+        Claude Code CLI over that CLI's own JSON stream and deliberately does not
+        go through ``AcpProvider``, so no ACP backend id applies to it. See
+        ``providers/codebrain.py``.
+
+        The factory accepts an optional ``session_key`` to create a per-session
+        subdirectory under ``workspace_root()``.
         """
         from kiro_crew.agent_sdk.provider_identity import PROVIDER_CODEBRAIN
 
